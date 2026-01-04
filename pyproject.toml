@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "barebox-bringup"
+version = "0.1.0"
+description = "Barebox hardware bringup tool using labgrid"
+readme = "README.md"
+license = {text = "GPL-2.0-only"}
+authors = [
+    {name = "barebox contributors"}
+]
+requires-python = ">=3.7"
+dependencies = [
+    "labgrid",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v2 (GPLv2)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Embedded Systems",
+    "Topic :: System :: Boot",
+]
+
+[project.scripts]
+barebox-bringup = "barebox_bringup:main"
+
+[project.urls]
+Homepage = "https://barebox.org"
+Repository = "https://git.pengutronix.de/cgit/barebox"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["barebox_bringup*"]
