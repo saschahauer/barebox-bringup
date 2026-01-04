@@ -194,9 +194,11 @@ def interactive_console(console, input_fifo=None, output_fd=None, timeout=0):
         else:
             # Use stdin
             input_fd = sys.stdin.fileno()
-            old_settings = termios.tcgetattr(input_fd)
-            # Set terminal to raw mode (pass through all keypresses)
-            tty.setraw(input_fd)
+            # Only set raw mode if stdin is actually a TTY
+            if os.isatty(input_fd):
+                old_settings = termios.tcgetattr(input_fd)
+                # Set terminal to raw mode (pass through all keypresses)
+                tty.setraw(input_fd)
 
         while True:
             # Check timeout
