@@ -45,7 +45,7 @@ Examples:
   echo "help" > /tmp/cmds.fifo
 
   # Non-interactive (no keyboard input, output only)
-  %(prog)s -c test/arm/imx6s-riotboard.yaml -n -o boot.log --timeout 0
+  %(prog)s -c test/arm/imx6s-riotboard.yaml -n -o boot.log
 ''')
 
     # Required arguments
@@ -71,8 +71,8 @@ Examples:
     # Control options
     parser.add_argument('--no-power-cycle', action='store_true',
                         help='Skip power cycle, assume target is already on')
-    parser.add_argument('--timeout', type=int, default=60,
-                        help='Timeout in seconds for operations (default: 60, 0 = no timeout)')
+    parser.add_argument('--timeout', type=int, default=None,
+                        help='Timeout in seconds for operations (default: no timeout)')
 
     # Debugging
     parser.add_argument('-v', '--verbose', action='count', default=0,
@@ -449,7 +449,7 @@ def main():
                     print(f"  (Strategy error: {e})")
 
         # Enter appropriate console mode
-        timeout = args.timeout if args.timeout > 0 else 0
+        timeout = args.timeout if args.timeout is not None else 0
 
         if args.non_interactive:
             non_interactive_console(console, input_fifo, output_fd, timeout)
