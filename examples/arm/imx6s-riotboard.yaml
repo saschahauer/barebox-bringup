@@ -1,0 +1,28 @@
+# Embest i.MX6S RIoTboard hardware configuration
+# Requires RemotePlace "imx6" to be available on the coordinator
+#
+# The RemotePlace "imx6" includes:
+#   - NetworkIMXUSBLoader (for bootstrap via USB recovery)
+#   - NetworkSerialPort (serial console at 115200 baud)
+#   - TasmotaPowerPort (MQTT-controlled power switch)
+
+targets:
+  main:
+    resources:
+      RemotePlace:
+        name: imx6
+    drivers:
+    - IMXUSBDriver: {}
+    - TasmotaPowerDriver: {}
+    - SerialDriver:
+        txdelay: 0.01
+    - BareboxDriver:
+        prompt: 'barebox@[^:]+:[^ ]+ '
+        bootstring: 'commandline:'
+    - BootstrapStrategy: {}
+images:
+  barebox-embest-imx6s-riotboard.img: !template "$LG_BUILDDIR/images/barebox-embest-imx6s-riotboard.img"
+imports:
+  - ../strategy-bootstrap.py
+options:
+  coordinator_address: lg-coordinator:20408
