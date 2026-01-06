@@ -456,22 +456,30 @@ def main():
                     print("Warning: QEMU is not running, consider removing --no-power-cycle")
         else:
             # Hardware: use strategy
+            # First check if strategy driver exists
             try:
                 strategy = target.get_driver(Strategy)
-
-                if not args.no_power_cycle:
-                    print("Bootstrapping target...")
-                    strategy.transition('barebox')
-                    print("Target is ready!")
-                else:
-                    print("Skipping power cycle (--no-power-cycle)")
-                    print("Target should already be running")
-
             except Exception as e:
                 # No strategy configured - console-only mode
                 print("No strategy configured - console ready for manual control")
                 if args.verbose:
-                    print(f"  (Strategy error: {e})")
+                    print(f"  (No strategy driver: {e})")
+                strategy = None
+
+            # If strategy exists, use it - any errors should bail out
+            if strategy:
+                if not args.no_power_cycle:
+                    print("Bootstrapping target...")
+                    try:
+                        strategy.transition('barebox')
+                    except Exception as e:
+                        # Strategy failed - this is a fatal error
+                        print(f"Error: Strategy failed: {e}")
+                        raise
+                    print("Target is ready!")
+                else:
+                    print("Skipping power cycle (--no-power-cycle)")
+                    print("Target should already be running")
 
         # Enter appropriate console mode
         timeout = args.timeout if args.timeout is not None else 0
