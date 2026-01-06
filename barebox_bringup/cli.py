@@ -22,6 +22,7 @@ from labgrid.strategy import Strategy
 from labgrid.logging import basicConfig, StepLogger
 from labgrid.remote.client import start_session
 from labgrid.resource.remote import RemotePlaceManager
+from labgrid.util.proxy import proxymanager
 
 
 def create_argument_parser():
@@ -76,6 +77,8 @@ Examples:
                         help='Target role in config file (default: main)')
     parser.add_argument('--coordinator', type=str,
                         help='Labgrid coordinator address (overrides config/env)')
+    parser.add_argument('--proxy', type=str,
+                        help='Labgrid proxy address (overrides config/env)')
 
     # Control options
     parser.add_argument('--no-power-cycle', action='store_true',
@@ -136,12 +139,13 @@ def setup_input_fifo(input_arg):
             return input_arg, True
 
 
-def load_environment(config_file, coordinator=None, image_overrides=None):
+def load_environment(config_file, coordinator=None, proxy=None, image_overrides=None):
     """Load labgrid environment from configuration file
 
     Args:
         config_file: Path to YAML configuration file
         coordinator: Optional coordinator address override (highest priority)
+        proxy: Optional proxy address override (highest priority)
         image_overrides: Optional list of image overrides (overrides config file images)
 
     Returns:
@@ -153,6 +157,11 @@ def load_environment(config_file, coordinator=None, image_overrides=None):
         2. coordinator_address in YAML config file (options: section)
         3. LG_COORDINATOR environment variable
         4. Default: 127.0.0.1:20408
+
+        Proxy priority (highest to lowest):
+        1. --proxy command line argument (overrides everything)
+        2. proxy in YAML config file (options: section)
+        3. LG_PROXY environment variable
 
         Image overrides:
         Supports two formats:
@@ -174,6 +183,11 @@ def load_environment(config_file, coordinator=None, image_overrides=None):
     # This ensures CLI argument has highest priority
     if coordinator:
         env.config.set_option('coordinator_address', coordinator)
+
+    # Override proxy in config if --proxy was specified
+    # This ensures CLI argument has highest priority
+    if proxy:
+        env.config.set_option('proxy', proxy)
 
     # Override image paths if --image was specified
     if image_overrides:
@@ -528,7 +542,7 @@ def main():
 
         # Load labgrid environment
         print(f"Loading configuration: {args.config}")
-        env = load_environment(args.config, args.coordinator, args.images)
+        env = load_environment(args.config, args.coordinator, args.proxy, args.images)
 
         if args.images:
             for override in args.images:
@@ -547,6 +561,17 @@ def main():
                 coordinator_address = args.coordinator or env.config.get_option('coordinator_address')
             except (AttributeError, KeyError):
                 coordinator_address = os.environ.get('LG_COORDINATOR', '127.0.0.1:20408')
+
+            # Get and set proxy if configured
+            # Priority: --proxy CLI arg > config file > LG_PROXY env var
+            try:
+                proxy_address = args.proxy or env.config.get_option('proxy')
+            except (AttributeError, KeyError):
+                proxy_address = os.environ.get('LG_PROXY')
+
+            if proxy_address:
+                proxymanager.force_proxy(proxy_address)
+                print(f"Using proxy: {proxy_address}")
 
             print(f"Connecting to coordinator at {coordinator_address}...")
 
