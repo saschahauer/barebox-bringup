@@ -45,6 +45,9 @@ Examples:
   # Override multiple images from config file (named)
   %(prog)s -c test/arm/vusion-ugate.yaml --image tiboot3.img=/path/to/tiboot3.img --image barebox-proper.img=/path/to/barebox.img
 
+  # Use known-good images from config file
+  %(prog)s -c test/arm/vusion-ugate.yaml --known-good
+
   # Interactive with auto-created FIFO for programmatic control
   %(prog)s -c test/arm/imx6s-riotboard.yaml -i -o boot.log &
   # Tool prints: Created FIFO: /tmp/barebox-input-12345.fifo
@@ -87,6 +90,8 @@ Examples:
                         help='Timeout in seconds for operations (default: no timeout)')
     parser.add_argument('--image', action='append', dest='images',
                         help='Override image: --image name=path or --image path (for single image configs)')
+    parser.add_argument('-g', '--known-good', action='store_true',
+                        help='Use known-good images from config (known_good_images: section)')
 
     # Debugging
     parser.add_argument('-v', '--verbose', action='count', default=0,
@@ -139,7 +144,7 @@ def setup_input_fifo(input_arg):
             return input_arg, True
 
 
-def load_environment(config_file, coordinator=None, proxy=None, image_overrides=None):
+def load_environment(config_file, coordinator=None, proxy=None, image_overrides=None, use_known_good=False):
     """Load labgrid environment from configuration file
 
     Args:
@@ -147,6 +152,7 @@ def load_environment(config_file, coordinator=None, proxy=None, image_overrides=
         coordinator: Optional coordinator address override (highest priority)
         proxy: Optional proxy address override (highest priority)
         image_overrides: Optional list of image overrides (overrides config file images)
+        use_known_good: If True, use images from known_good_images: section instead of images:
 
     Returns:
         Environment object
@@ -171,6 +177,11 @@ def load_environment(config_file, coordinator=None, proxy=None, image_overrides=
         Examples:
         - --image tiboot3.img=/path/to/tiboot3.img --image barebox-proper.img=/path/to/barebox.img
         - --image /path/to/barebox.img (overrides first image)
+
+        Known-good images:
+        If use_known_good=True, replaces all images from 'images:' section with
+        corresponding entries from 'known_good_images:' section in YAML.
+        All regular images must have known-good versions or error is raised.
     """
     # Set up labgrid logging
     basicConfig(level=logging.WARNING)
@@ -213,6 +224,35 @@ def load_environment(config_file, coordinator=None, proxy=None, image_overrides=
                     abs_path = os.path.realpath(override)
                     env.config.data['images'][first_name] = abs_path
                     logging.info(f"Overriding first image '{first_name}' with {abs_path}")
+
+    # Handle --known-good flag: replace images with known-good versions
+    if use_known_good:
+        regular_images = env.config.data.get('images', {})
+        known_good_images = env.config.data.get('known_good_images', {})
+
+        if not regular_images:
+            logging.warning("No images defined in config, --known-good ignored")
+        elif not known_good_images:
+            print("Error: --known-good specified but no 'known_good_images:' section found in config")
+            sys.exit(1)
+        else:
+            # Validate: ALL regular images must have known-good versions
+            missing = []
+            for image_name in regular_images.keys():
+                if image_name not in known_good_images:
+                    missing.append(image_name)
+
+            if missing:
+                print(f"Error: --known-good specified but the following images lack known-good versions:")
+                for name in missing:
+                    print(f"  - {name}")
+                print(f"\nKnown-good images defined: {', '.join(known_good_images.keys())}")
+                sys.exit(1)
+
+            # All validations passed - replace images with known-good versions
+            # Note: known_good_images already have templates resolved by Config
+            env.config.data['images'] = known_good_images.copy()
+            logging.info(f"Using known-good images for: {', '.join(known_good_images.keys())}")
 
     return env
 
@@ -545,7 +585,7 @@ def main():
 
         # Load labgrid environment
         print(f"Loading configuration: {args.config}")
-        env = load_environment(args.config, args.coordinator, args.proxy, args.images)
+        env = load_environment(args.config, args.coordinator, args.proxy, args.images, args.known_good)
 
         if args.images:
             for override in args.images:
@@ -554,6 +594,12 @@ def main():
                     print(f"Image override: {name} = {path}")
                 else:
                     print(f"Image override (first): {override}")
+
+        if args.known_good:
+            images = env.config.get_images()
+            print(f"Using known-good images:")
+            for name, path in images.items():
+                print(f"  - {name}: {path}")
 
         # Check if this config uses a RemotePlace (requires coordinator)
         place_name = find_place_name(env, args.role)
