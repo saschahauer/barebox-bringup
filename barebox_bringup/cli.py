@@ -38,8 +38,11 @@ Examples:
   %(prog)s -c test/arm/imx6s-riotboard.yaml -o session.log
   # In another terminal: tail -f session.log
 
-  # Override image from config file
+  # Override single image from config file (positional)
   %(prog)s -c test/arm/imx6s-riotboard.yaml --image /path/to/barebox.img
+
+  # Override multiple images from config file (named)
+  %(prog)s -c test/arm/vusion-ugate.yaml --image tiboot3.img=/path/to/tiboot3.img --image barebox-proper.img=/path/to/barebox.img
 
   # Interactive with auto-created FIFO for programmatic control
   %(prog)s -c test/arm/imx6s-riotboard.yaml -i -o boot.log &
@@ -79,8 +82,8 @@ Examples:
                         help='Skip power cycle, assume target is already on')
     parser.add_argument('--timeout', type=int, default=None,
                         help='Timeout in seconds for operations (default: no timeout)')
-    parser.add_argument('--image', type=str,
-                        help='Override image path from config file')
+    parser.add_argument('--image', action='append', dest='images',
+                        help='Override image: --image name=path or --image path (for single image configs)')
 
     # Debugging
     parser.add_argument('-v', '--verbose', action='count', default=0,
@@ -133,13 +136,13 @@ def setup_input_fifo(input_arg):
             return input_arg, True
 
 
-def load_environment(config_file, coordinator=None, image_override=None):
+def load_environment(config_file, coordinator=None, image_overrides=None):
     """Load labgrid environment from configuration file
 
     Args:
         config_file: Path to YAML configuration file
         coordinator: Optional coordinator address override (highest priority)
-        image_override: Optional image path override (overrides config file images)
+        image_overrides: Optional list of image overrides (overrides config file images)
 
     Returns:
         Environment object
@@ -151,8 +154,14 @@ def load_environment(config_file, coordinator=None, image_override=None):
         3. LG_COORDINATOR environment variable
         4. Default: 127.0.0.1:20408
 
-        Image override:
-        When --image is specified, it replaces the first image in the config file
+        Image overrides:
+        Supports two formats:
+        - Named: "name=path" - Override specific image by name
+        - Positional: "path" - Override first image (backwards compatibility)
+
+        Examples:
+        - --image tiboot3.img=/path/to/tiboot3.img --image barebox-proper.img=/path/to/barebox.img
+        - --image /path/to/barebox.img (overrides first image)
     """
     # Set up labgrid logging
     basicConfig(level=logging.WARNING)
@@ -166,18 +175,30 @@ def load_environment(config_file, coordinator=None, image_override=None):
     if coordinator:
         env.config.set_option('coordinator_address', coordinator)
 
-    # Override image path if --image was specified
-    if image_override:
+    # Override image paths if --image was specified
+    if image_overrides:
         images = env.config.get_images()
-        if images:
-            # Get the first image name and override its path
-            image_name = list(images.keys())[0]
-            # Make the path absolute
-            image_path = os.path.realpath(image_override)
-            # Set the new path in the config data
-            env.config.data['images'][image_name] = image_path
+        if not images:
+            logging.warning("No images defined in config, --image option(s) ignored")
         else:
-            logging.warning("No images defined in config, --image option ignored")
+            for override in image_overrides:
+                if '=' in override:
+                    # Named format: name=path
+                    name, path = override.split('=', 1)
+                    if name in images:
+                        abs_path = os.path.realpath(path)
+                        env.config.data['images'][name] = abs_path
+                        logging.info(f"Overriding image '{name}' with {abs_path}")
+                    else:
+                        available = ', '.join(images.keys())
+                        logging.warning(f"Image '{name}' not found in config (available: {available}), ignoring")
+                else:
+                    # Positional format: just path (backwards compatibility)
+                    # Override first image
+                    first_name = list(images.keys())[0]
+                    abs_path = os.path.realpath(override)
+                    env.config.data['images'][first_name] = abs_path
+                    logging.info(f"Overriding first image '{first_name}' with {abs_path}")
 
     return env
 
@@ -507,10 +528,15 @@ def main():
 
         # Load labgrid environment
         print(f"Loading configuration: {args.config}")
-        env = load_environment(args.config, args.coordinator, args.image)
+        env = load_environment(args.config, args.coordinator, args.images)
 
-        if args.image:
-            print(f"Image override: {args.image}")
+        if args.images:
+            for override in args.images:
+                if '=' in override:
+                    name, path = override.split('=', 1)
+                    print(f"Image override: {name} = {path}")
+                else:
+                    print(f"Image override (first): {override}")
 
         # Check if this config uses a RemotePlace (requires coordinator)
         place_name = find_place_name(env, args.role)
