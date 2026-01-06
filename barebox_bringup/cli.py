@@ -17,7 +17,7 @@ import time
 import asyncio
 
 from labgrid import Environment, target_factory
-from labgrid.protocol import ConsoleProtocol
+from labgrid.protocol import ConsoleProtocol, PowerProtocol
 from labgrid.strategy import Strategy
 from labgrid.logging import basicConfig, StepLogger
 from labgrid.remote.client import start_session
@@ -514,6 +514,9 @@ def main():
     place_name = None
     place_acquired = False  # Track if we acquired (vs. found already acquired)
     loop = None
+    target = None
+    console = None
+    is_qemu = False
 
     try:
         # Auto-detect LG_BUILDDIR if not set (same logic as conftest.py)
@@ -610,7 +613,7 @@ def main():
             from labgrid.driver import QEMUDriver
             is_qemu = isinstance(console, QEMUDriver)
         except ImportError:
-            is_qemu = False
+            pass  # is_qemu remains False
 
         if is_qemu:
             # QEMU: add -nographic BEFORE activation
@@ -684,6 +687,26 @@ def main():
             traceback.print_exc()
         return 1
     finally:
+        # Power off the target before cleanup
+        if console:
+            try:
+                if is_qemu:
+                    # QEMU: use console.off() to shut down
+                    print("Shutting down QEMU...")
+                    console.off()
+                else:
+                    # Hardware: use power driver if available
+                    try:
+                        power = target.get_driver(PowerProtocol, activate=False)
+                        print("Powering off target...")
+                        power.off()
+                    except Exception as e:
+                        # No power driver or power off failed
+                        if args.verbose:
+                            print(f"  (Could not power off: {e})")
+            except Exception as e:
+                print(f"Warning: Failed to power off target: {e}")
+
         # Release place only if we acquired it (not if it was already acquired)
         if session and place_name and place_acquired and loop:
             try:
