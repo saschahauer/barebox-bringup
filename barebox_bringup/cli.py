@@ -695,15 +695,31 @@ def main():
                     print("Shutting down QEMU...")
                     console.off()
                 else:
-                    # Hardware: use power driver if available
+                    # Hardware: try strategy first (handles multiple power sources),
+                    # then fall back to PowerProtocol for simple cases
+                    powered_off = False
+
+                    # Try strategy transition to 'off' state
                     try:
-                        power = target.get_driver(PowerProtocol, activate=False)
-                        print("Powering off target...")
-                        power.off()
-                    except Exception as e:
-                        # No power driver or power off failed
-                        if args.verbose:
-                            print(f"  (Could not power off: {e})")
+                        strategy = target.get_driver(Strategy, activate=False)
+                        if strategy:
+                            print("Powering off target via strategy...")
+                            strategy.transition('off')
+                            powered_off = True
+                    except Exception:
+                        # Strategy not available or doesn't support 'off' state
+                        pass
+
+                    # Fallback: use PowerProtocol directly (for non-strategy configs)
+                    if not powered_off:
+                        try:
+                            power = target.get_driver(PowerProtocol, activate=False)
+                            print("Powering off target...")
+                            power.off()
+                        except Exception as e:
+                            # No power driver or power off failed
+                            if args.verbose:
+                                print(f"  (Could not power off: {e})")
             except Exception as e:
                 print(f"Warning: Failed to power off target: {e}")
 
