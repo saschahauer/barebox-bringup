@@ -73,6 +73,12 @@ echo "version" > /tmp/barebox-input-12345.fifo
 barebox-bringup -c test/arm/imx6s-riotboard.yaml -n -o boot.log --timeout 0
 ```
 
+### Override barebox image from command line
+
+```bash
+barebox-bringup -c test/arm/imx6s-riotboard.yaml --image /path/to/custom-barebox.img
+```
+
 ## Command-line options
 
 ```
@@ -83,7 +89,8 @@ barebox-bringup -c test/arm/imx6s-riotboard.yaml -n -o boot.log --timeout 0
 -r, --role ROLE         Target role in config file (default: main)
 --coordinator ADDR      Labgrid coordinator address
 --no-power-cycle        Skip power cycle, assume target is on
---timeout SECS          Timeout in seconds (default: 60, 0 = no timeout)
+--timeout SECS          Timeout in seconds (default: no timeout)
+--image PATH            Override image path from config file
 -v, --verbose           Increase verbosity (-v, -vv, -vvv)
 ```
 

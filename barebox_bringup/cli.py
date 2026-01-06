@@ -35,6 +35,9 @@ Examples:
   %(prog)s -c test/arm/imx6s-riotboard.yaml -o session.log
   # In another terminal: tail -f session.log
 
+  # Override image from config file
+  %(prog)s -c test/arm/imx6s-riotboard.yaml --image /path/to/barebox.img
+
   # Interactive with auto-created FIFO for programmatic control
   %(prog)s -c test/arm/imx6s-riotboard.yaml -i -o boot.log &
   # Tool prints: Created FIFO: /tmp/barebox-input-12345.fifo
@@ -73,6 +76,8 @@ Examples:
                         help='Skip power cycle, assume target is already on')
     parser.add_argument('--timeout', type=int, default=None,
                         help='Timeout in seconds for operations (default: no timeout)')
+    parser.add_argument('--image', type=str,
+                        help='Override image path from config file')
 
     # Debugging
     parser.add_argument('-v', '--verbose', action='count', default=0,
@@ -125,12 +130,13 @@ def setup_input_fifo(input_arg):
             return input_arg, True
 
 
-def load_environment(config_file, coordinator=None):
+def load_environment(config_file, coordinator=None, image_override=None):
     """Load labgrid environment from configuration file
 
     Args:
         config_file: Path to YAML configuration file
         coordinator: Optional coordinator address override (highest priority)
+        image_override: Optional image path override (overrides config file images)
 
     Returns:
         Environment object
@@ -141,6 +147,9 @@ def load_environment(config_file, coordinator=None):
         2. coordinator_address in YAML config file (options: section)
         3. LG_COORDINATOR environment variable
         4. Default: 127.0.0.1:20408
+
+        Image override:
+        When --image is specified, it replaces the first image in the config file
     """
     # Set up labgrid logging
     basicConfig(level=logging.WARNING)
@@ -153,6 +162,19 @@ def load_environment(config_file, coordinator=None):
     # This ensures CLI argument has highest priority
     if coordinator:
         env.config.set_option('coordinator_address', coordinator)
+
+    # Override image path if --image was specified
+    if image_override:
+        images = env.config.get_images()
+        if images:
+            # Get the first image name and override its path
+            image_name = list(images.keys())[0]
+            # Make the path absolute
+            image_path = os.path.realpath(image_override)
+            # Set the new path in the config data
+            env.config.data['images'][image_name] = image_path
+        else:
+            logging.warning("No images defined in config, --image option ignored")
 
     return env
 
@@ -387,7 +409,10 @@ def main():
 
         # Load labgrid environment
         print(f"Loading configuration: {args.config}")
-        env = load_environment(args.config, args.coordinator)
+        env = load_environment(args.config, args.coordinator, args.image)
+
+        if args.image:
+            print(f"Image override: {args.image}")
 
         # Get target
         target = env.get_target(args.role)
