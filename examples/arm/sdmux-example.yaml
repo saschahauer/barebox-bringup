@@ -1,0 +1,69 @@
+# Example SD-MUX based board configuration
+# This template shows how to use the SDMuxStrategy for boards that boot from SD card
+#
+# Hardware Requirements:
+#   - USB-SD-MUX hardware (https://www.linux-automation.com/en/products/usb-sd-mux.html)
+#   - Serial console access
+#   - Power control (e.g., Tasmota, NetworkPowerPort)
+#
+# The RemotePlace should include:
+#   - NetworkUSBSDMuxDevice (SD card mux control)
+#   - NetworkSerialPort (serial console)
+#   - NetworkPowerPort (power control)
+#
+# Usage:
+#   # Write image and boot
+#   barebox-bringup -c examples/arm/sdmux-example.yaml
+#
+#   # Boot from existing SD card (skip writing)
+#   barebox-bringup -c examples/arm/sdmux-example.yaml --no-write
+#
+#   # Override image
+#   barebox-bringup -c examples/arm/sdmux-example.yaml --image /path/to/custom-barebox.img
+
+targets:
+  main:
+    resources:
+      RemotePlace:
+        name: my-sdmux-board  # Replace with your actual place name
+    drivers:
+      # Power driver (for power cycling)
+      - TasmotaPowerDriver: {}
+      # Or use NetworkPowerDriver, PDUDaemonDriver, etc.
+
+      # Serial console driver
+      - SerialDriver:
+          txdelay: 0.01
+
+      # SD-MUX driver (controls SD card routing)
+      - USBSDMuxDriver: {}
+
+      # USB Storage driver (writes images to SD card)
+      - USBStorageDriver: {}
+
+      # Barebox driver (for interacting with barebox shell)
+      - BareboxDriver:
+          prompt: 'barebox@[^:]+:[^ ]+ '
+          bootstring: 'commandline:'
+
+      # SD-MUX Strategy (orchestrates the boot process)
+      - SDMuxStrategy: {}
+
+images:
+  # Single image to write to SD card
+  # Use $LG_BUILDDIR for barebox build output
+  barebox.img: !template "$LG_BUILDDIR/images/barebox-my-board.img"
+
+  # Or use absolute path
+  # barebox.img: "/path/to/barebox.img"
+
+# Optional: Known-good images for --known-good flag
+known_good_images:
+  barebox.img: "/path/to/validated/barebox.img"
+
+imports:
+  - ../strategy-sdmux.py
+
+options:
+  coordinator_address: lg-coordinator:20408  # Adjust for your lab
+  # proxy: "127.0.0.1:8888"  # Optional proxy

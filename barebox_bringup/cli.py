@@ -92,6 +92,8 @@ Examples:
                         help='Override image: --image name=path or --image path (for single image configs)')
     parser.add_argument('-g', '--known-good', action='store_true',
                         help='Use known-good images from config (known_good_images: section)')
+    parser.add_argument('--no-write', action='store_true',
+                        help='Skip writing images to SD card, boot from existing card (SD-MUX only)')
 
     # Debugging
     parser.add_argument('-v', '--verbose', action='count', default=0,
@@ -144,7 +146,7 @@ def setup_input_fifo(input_arg):
             return input_arg, True
 
 
-def load_environment(config_file, coordinator=None, proxy=None, image_overrides=None, use_known_good=False):
+def load_environment(config_file, coordinator=None, proxy=None, image_overrides=None, use_known_good=False, no_write=False):
     """Load labgrid environment from configuration file
 
     Args:
@@ -153,6 +155,7 @@ def load_environment(config_file, coordinator=None, proxy=None, image_overrides=
         proxy: Optional proxy address override (highest priority)
         image_overrides: Optional list of image overrides (overrides config file images)
         use_known_good: If True, use images from known_good_images: section instead of images:
+        no_write: If True, skip writing images to SD card (SD-MUX only)
 
     Returns:
         Environment object
@@ -253,6 +256,11 @@ def load_environment(config_file, coordinator=None, proxy=None, image_overrides=
             # Note: known_good_images already have templates resolved by Config
             env.config.data['images'] = known_good_images.copy()
             logging.info(f"Using known-good images for: {', '.join(known_good_images.keys())}")
+
+    # Set no_write option if --no-write was specified
+    if no_write:
+        env.config.set_option('no_write', True)
+        logging.info("--no-write: Skipping image writing to SD card")
 
     return env
 
@@ -585,7 +593,7 @@ def main():
 
         # Load labgrid environment
         print(f"Loading configuration: {args.config}")
-        env = load_environment(args.config, args.coordinator, args.proxy, args.images, args.known_good)
+        env = load_environment(args.config, args.coordinator, args.proxy, args.images, args.known_good, args.no_write)
 
         if args.images:
             for override in args.images:
