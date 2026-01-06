@@ -14,11 +14,14 @@ import argparse
 import logging
 import signal
 import time
+import asyncio
 
-from labgrid import Environment
+from labgrid import Environment, target_factory
 from labgrid.protocol import ConsoleProtocol
 from labgrid.strategy import Strategy
 from labgrid.logging import basicConfig, StepLogger
+from labgrid.remote.client import start_session
+from labgrid.resource.remote import RemotePlaceManager
 
 
 def create_argument_parser():
@@ -177,6 +180,97 @@ def load_environment(config_file, coordinator=None, image_override=None):
             logging.warning("No images defined in config, --image option ignored")
 
     return env
+
+
+def find_place_name(env, role='main'):
+    """Find the RemotePlace name from environment configuration
+
+    Args:
+        env: Environment object
+        role: Target role to search (default: 'main')
+
+    Returns:
+        Place name (str) or None if no RemotePlace found
+    """
+    targets = env.config.get_targets()
+    if not targets or role not in targets:
+        return None
+
+    role_config = targets[role]
+    resources, _ = target_factory.normalize_config(role_config)
+    remote_places = resources.get('RemotePlace', {})
+
+    # Return the first RemotePlace name found
+    for place_name in remote_places:
+        return place_name
+
+    return None
+
+
+def prepare_manager(session, loop):
+    """Prepare RemotePlaceManager for use with session
+
+    This must be called before using env.get_target() with remote places.
+
+    Args:
+        session: ClientSession object
+        loop: Event loop
+    """
+    manager = RemotePlaceManager.get()
+    manager.session = session
+    manager.loop = loop
+
+
+async def acquire_place(session, place_name):
+    """Acquire a place via coordinator
+
+    Args:
+        session: ClientSession object
+        place_name: Name of the place to acquire
+
+    Returns:
+        bool: True if we acquired the place, False if it was already acquired
+    """
+    place = session.get_place(place_name)
+    if place.acquired:
+        host, user = place.acquired.split("/")
+        if session.getuser() == user and session.gethostname() == host:
+            print(f"Place {place_name} already acquired by this session")
+            return False  # Already acquired, we didn't acquire it
+        else:
+            raise RuntimeError(
+                f"Place {place_name} is already acquired by {place.acquired}"
+            )
+
+    # Import the protobuf request type
+    from labgrid.remote.generated import labgrid_coordinator_pb2
+
+    request = labgrid_coordinator_pb2.AcquirePlaceRequest(placename=place_name)
+    await session.stub.AcquirePlace(request)
+    await session.sync_with_coordinator()
+    print(f"Acquired place {place_name}")
+    return True  # We acquired it
+
+
+async def release_place(session, place_name):
+    """Release a previously acquired place
+
+    Args:
+        session: ClientSession object
+        place_name: Name of the place to release
+    """
+    place = session.get_place(place_name)
+    if not place.acquired:
+        # Already released or never acquired
+        return
+
+    # Import the protobuf request type
+    from labgrid.remote.generated import labgrid_coordinator_pb2
+
+    request = labgrid_coordinator_pb2.ReleasePlaceRequest(placename=place_name)
+    await session.stub.ReleasePlace(request)
+    await session.sync_with_coordinator()
+    print(f"Released place {place_name}")
 
 
 def interactive_console(console, input_fifo=None, output_fd=None, timeout=0):
@@ -381,6 +475,10 @@ def main():
     input_fifo = None
     fifo_created = False
     output_fd = None
+    session = None
+    place_name = None
+    place_acquired = False  # Track if we acquired (vs. found already acquired)
+    loop = None
 
     try:
         # Auto-detect LG_BUILDDIR if not set (same logic as conftest.py)
@@ -413,6 +511,39 @@ def main():
 
         if args.image:
             print(f"Image override: {args.image}")
+
+        # Check if this config uses a RemotePlace (requires coordinator)
+        place_name = find_place_name(env, args.role)
+
+        if place_name:
+            # Get coordinator address
+            try:
+                coordinator_address = args.coordinator or env.config.get_option('coordinator_address')
+            except (AttributeError, KeyError):
+                coordinator_address = os.environ.get('LG_COORDINATOR', '127.0.0.1:20408')
+
+            print(f"Connecting to coordinator at {coordinator_address}...")
+
+            # Create event loop and session
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            extra = {
+                'args': args,
+                'env': env,
+                'role': args.role,
+                'prog': 'barebox-bringup'
+            }
+
+            session = start_session(coordinator_address, extra=extra, loop=loop)
+            print(f"Connected to coordinator")
+
+            # Prepare the RemotePlaceManager before acquiring
+            prepare_manager(session, loop)
+
+            # Acquire the place
+            print(f"Acquiring place {place_name}...")
+            place_acquired = loop.run_until_complete(acquire_place(session, place_name))
 
         # Get target
         target = env.get_target(args.role)
@@ -502,6 +633,29 @@ def main():
             traceback.print_exc()
         return 1
     finally:
+        # Release place only if we acquired it (not if it was already acquired)
+        if session and place_name and place_acquired and loop:
+            try:
+                print(f"Releasing place {place_name}...")
+                loop.run_until_complete(release_place(session, place_name))
+            except Exception as e:
+                print(f"Warning: Failed to release place: {e}")
+
+        # Stop and close session
+        if session and loop:
+            try:
+                loop.run_until_complete(session.stop())
+                loop.run_until_complete(session.close())
+            except Exception as e:
+                print(f"Warning: Failed to close session: {e}")
+
+        # Close event loop
+        if loop:
+            try:
+                loop.close()
+            except Exception:
+                pass
+
         # Cleanup
         if output_fd is not None:
             try:
