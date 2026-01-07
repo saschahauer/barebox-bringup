@@ -93,8 +93,8 @@ Examples:
                         help='Timeout in seconds for operations (default: no timeout)')
     parser.add_argument('--image', action='append', dest='images',
                         help='Override image: --image name=path or --image path (for single image configs)')
-    parser.add_argument('--images', type=str, default='default', dest='image_set',
-                        help='Select named image set from config (default: default)')
+    parser.add_argument('--images', type=str, default=None, dest='image_set',
+                        help='Select named image set from config (default: auto-detect from environment)')
     parser.add_argument('--no-write', action='store_true',
                         help='Skip writing images to SD card, boot from existing card (SD-MUX only)')
 
@@ -149,6 +149,33 @@ def setup_input_fifo(input_arg):
             return input_arg, True
 
 
+def determine_image_set(requested_set=None):
+    """Determine which image set to use based on environment and user input
+
+    Args:
+        requested_set: Image set explicitly requested by user (or None for auto-detect)
+
+    Returns:
+        str: Name of image set to use ('default', 'yocto', or user-specified)
+
+    Priority:
+        1. User explicitly specified via --images (highest priority)
+        2. BBPATH environment variable set -> use 'yocto'
+        3. Default to 'default'
+    """
+    if requested_set is not None:
+        # User explicitly requested a specific set
+        return requested_set
+
+    # Auto-detect based on environment
+    if 'BBPATH' in os.environ:
+        logging.info("Detected BBPATH environment variable, using 'yocto' image set")
+        return 'yocto'
+
+    # Default
+    return 'default'
+
+
 def load_environment(config_file, coordinator=None, proxy=None, image_overrides=None, image_set='default', no_write=False):
     """Load labgrid environment from configuration file
 
@@ -157,7 +184,7 @@ def load_environment(config_file, coordinator=None, proxy=None, image_overrides=
         coordinator: Optional coordinator address override (highest priority)
         proxy: Optional proxy address override (highest priority)
         image_overrides: Optional list of image overrides (overrides config file images)
-        use_known_good: If True, use images from known_good_images: section instead of images:
+        image_set: Name of image set to use from config (default: 'default')
         no_write: If True, skip writing images to SD card (SD-MUX only)
 
     Returns:
@@ -175,6 +202,12 @@ def load_environment(config_file, coordinator=None, proxy=None, image_overrides=
         2. proxy in YAML config file (options: section)
         3. LG_PROXY environment variable
 
+        Image set selection:
+        Priority (highest to lowest):
+        1. User explicitly specified via --images
+        2. BBPATH environment variable set -> use 'yocto'
+        3. Default to 'default'
+
         Image overrides:
         Supports two formats:
         - Named: "name=path" - Override specific image by name
@@ -183,11 +216,6 @@ def load_environment(config_file, coordinator=None, proxy=None, image_overrides=
         Examples:
         - --image tiboot3.img=/path/to/tiboot3.img --image barebox-proper.img=/path/to/barebox.img
         - --image /path/to/barebox.img (overrides first image)
-
-        Known-good images:
-        If use_known_good=True, replaces all images from 'images:' section with
-        corresponding entries from 'known_good_images:' section in YAML.
-        All regular images must have known-good versions or error is raised.
     """
     # Set up labgrid logging
     basicConfig(level=logging.WARNING)
@@ -865,9 +893,14 @@ def main():
             output_fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
             print(f"Output logging to: {args.output}")
 
+        # Determine which image set to use (respects --images or auto-detects from environment)
+        image_set = determine_image_set(args.image_set)
+        if args.image_set is None and image_set != 'default':
+            print(f"Auto-detected image set: '{image_set}' (from environment)")
+
         # Load labgrid environment
         print(f"Loading configuration: {args.config}")
-        env = load_environment(args.config, args.coordinator, args.proxy, args.images, args.image_set, args.no_write)
+        env = load_environment(args.config, args.coordinator, args.proxy, args.images, image_set, args.no_write)
 
         if args.images:
             for override in args.images:
@@ -877,9 +910,9 @@ def main():
                 else:
                     print(f"Image override (first): {override}")
 
-        if args.image_set != 'default':
+        if image_set != 'default':
             images = env.config.get_images()
-            print(f"Using image set '{args.image_set}':")
+            print(f"Using image set '{image_set}':")
             for name, path in images.items():
                 print(f"  - {name}: {path}")
 

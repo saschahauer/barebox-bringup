@@ -91,6 +91,34 @@ barebox-bringup -c config.yaml --images known_good
 barebox-bringup -c config.yaml --images testing
 ```
 
+#### Auto-Detection of Yocto Builds
+
+When the `BBPATH` environment variable is set (indicating you're inside a Yocto build environment), the tool automatically selects the `yocto` image set instead of `default`:
+
+```yaml
+images:
+  default:
+    barebox.img: !template "$LG_BUILDDIR/images/barebox-board.img"
+
+  yocto:
+    barebox.img: !template "$BBPATH/../build/tmp/deploy/images/myboard/barebox.img"
+```
+
+Selection priority:
+1. **Explicit --images flag** (highest priority): Always used if specified
+2. **BBPATH environment variable**: Automatically selects 'yocto' if set
+3. **Default**: Uses 'default' image set
+
+Example Yocto workflow:
+```bash
+# Inside Yocto build environment (BBPATH is set)
+cd ~/yocto/build
+barebox-bringup -c ~/labgrid-places/arm/myboard.yaml  # Automatically uses 'yocto' image set
+
+# Override to use a different set
+barebox-bringup -c ~/labgrid-places/arm/myboard.yaml --images known_good
+```
+
 #### Backward Compatibility
 The tool supports the old singular `image:` key for backward compatibility:
 
@@ -113,6 +141,7 @@ Custom labgrid strategy for bootstrap-based targets:
 
 - `LG_BUILDDIR`: Path to barebox build directory (auto-detected from `KBUILD_OUTPUT` or `./build`)
 - `LG_COORDINATOR`: Labgrid coordinator address (can be overridden via `--coordinator`)
+- `BBPATH`: Yocto build environment indicator (when set, automatically selects 'yocto' image set)
 
 ## Important Code Patterns
 
