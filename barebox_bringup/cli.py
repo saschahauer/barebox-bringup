@@ -356,6 +356,102 @@ async def release_place(session, place_name):
     print(f"Released place {place_name}")
 
 
+def _open_input_source(input_fifo):
+    """Open input source (FIFO or stdin) and setup terminal
+
+    Args:
+        input_fifo: Optional path to FIFO, or None for stdin
+
+    Returns:
+        tuple: (input_fd, old_settings)
+               old_settings is None if stdin is not a TTY or using FIFO
+    """
+    import tty
+    import termios
+
+    if input_fifo:
+        # Open FIFO in non-blocking mode
+        input_fd = os.open(input_fifo, os.O_RDONLY | os.O_NONBLOCK)
+        old_settings = None
+    else:
+        # Use stdin
+        input_fd = sys.stdin.fileno()
+        old_settings = None
+        # Only set raw mode if stdin is actually a TTY
+        if os.isatty(input_fd):
+            old_settings = termios.tcgetattr(input_fd)
+            tty.setraw(input_fd)
+
+    return input_fd, old_settings
+
+
+def _close_input_source(input_fd, old_settings, input_fifo):
+    """Close input source and restore terminal settings
+
+    Args:
+        input_fd: File descriptor to close (or None)
+        old_settings: Terminal settings to restore (or None)
+        input_fifo: FIFO path (for determining whether to close fd)
+    """
+    import termios
+
+    # Restore terminal settings if using stdin
+    if old_settings:
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)
+
+    # Close FIFO if opened
+    if input_fifo and input_fd is not None:
+        os.close(input_fd)
+
+
+def _read_from_input(input_fd, input_fifo, check_ctrl_bracket=True):
+    """Read data from input source (FIFO or stdin)
+
+    Args:
+        input_fd: File descriptor to read from
+        input_fifo: FIFO path (or None for stdin)
+        check_ctrl_bracket: If True, check for Ctrl-] exit key
+
+    Returns:
+        tuple: (data, should_exit)
+               data is bytes or None, should_exit is boolean
+    """
+    try:
+        data = os.read(input_fd, 1024)
+        if not data:
+            # EOF
+            if not input_fifo:
+                # EOF on stdin - exit
+                return None, True
+            return None, False
+
+        # Check for Ctrl-] only from keyboard (not FIFO)
+        if check_ctrl_bracket and not input_fifo and len(data) == 1 and data == b'\x1d':
+            return None, True
+
+        return data, False
+    except OSError:
+        # EAGAIN/EWOULDBLOCK on non-blocking read
+        return None, False
+
+
+def _read_from_console(console):
+    """Read data from console with timeout handling
+
+    Args:
+        console: Active ConsoleProtocol driver
+
+    Returns:
+        bytes or None
+    """
+    try:
+        data = console.read(timeout=0.05, max_size=4096)
+        return data if data else None
+    except Exception:
+        # Timeout is expected
+        return None
+
+
 def interactive_console(console, input_fifo=None, output_fd=None, timeout=0):
     """Provide interactive console access with manual I/O handling
 
@@ -370,8 +466,6 @@ def interactive_console(console, input_fifo=None, output_fd=None, timeout=0):
         timeout: Timeout in seconds (0 = no timeout)
     """
     import select
-    import tty
-    import termios
 
     print("=== Interactive Console ===")
     if input_fifo:
@@ -381,23 +475,12 @@ def interactive_console(console, input_fifo=None, output_fd=None, timeout=0):
         print("Press Ctrl-] to exit")
     print("=" * 40)
 
-    # Setup input source
     input_fd = None
     old_settings = None
     start_time = time.time() if timeout > 0 else None
 
     try:
-        if input_fifo:
-            # Open FIFO in non-blocking mode
-            input_fd = os.open(input_fifo, os.O_RDONLY | os.O_NONBLOCK)
-        else:
-            # Use stdin
-            input_fd = sys.stdin.fileno()
-            # Only set raw mode if stdin is actually a TTY
-            if os.isatty(input_fd):
-                old_settings = termios.tcgetattr(input_fd)
-                # Set terminal to raw mode (pass through all keypresses)
-                tty.setraw(input_fd)
+        input_fd, old_settings = _open_input_source(input_fifo)
 
         while True:
             # Check timeout
@@ -410,43 +493,24 @@ def interactive_console(console, input_fifo=None, output_fd=None, timeout=0):
 
             # Read from input source and send to console
             if input_fd in readable:
-                try:
-                    data = os.read(input_fd, 1024)
-                    if not data:
-                        # EOF
-                        if not input_fifo:
-                            # EOF on stdin - exit
-                            break
-                    else:
-                        # Check for Ctrl-] only from keyboard (not FIFO)
-                        if not input_fifo and len(data) == 1 and data == b'\x1d':
-                            break
-                        console.write(data)
-                except OSError:
-                    # EAGAIN/EWOULDBLOCK on non-blocking read
-                    pass
+                data, should_exit = _read_from_input(input_fd, input_fifo, check_ctrl_bracket=True)
+                if should_exit:
+                    break
+                if data:
+                    console.write(data)
 
             # Read from console and display
-            try:
-                data = console.read(timeout=0.05, max_size=4096)
-                if data:
-                    sys.stdout.buffer.write(data)
-                    sys.stdout.buffer.flush()
-                    if output_fd:
-                        os.write(output_fd, data)
-            except Exception:
-                # Timeout is expected
-                pass
+            data = _read_from_console(console)
+            if data:
+                sys.stdout.buffer.write(data)
+                sys.stdout.buffer.flush()
+                if output_fd:
+                    os.write(output_fd, data)
 
     except KeyboardInterrupt:
         pass
     finally:
-        # Restore terminal settings if using stdin
-        if old_settings:
-            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)
-        # Close FIFO if opened
-        if input_fifo and input_fd is not None:
-            os.close(input_fd)
+        _close_input_source(input_fd, old_settings, input_fifo)
         print("\n=== Console closed ===")
 
 
@@ -479,9 +543,8 @@ def non_interactive_console(console, input_fifo=None, output_fd=None, timeout=60
     signal.signal(signal.SIGINT, signal_handler)
 
     try:
-        # Open input FIFO if provided
+        # Open input FIFO if provided (no terminal setup for non-interactive)
         if input_fifo:
-            # Open FIFO in non-blocking mode
             input_fd = os.open(input_fifo, os.O_RDONLY | os.O_NONBLOCK)
 
         # Read all output until timeout or Ctrl-C
@@ -495,9 +558,7 @@ def non_interactive_console(console, input_fifo=None, output_fd=None, timeout=60
                 break
 
             # Build list of file descriptors to monitor
-            read_fds = []
-            if input_fd is not None:
-                read_fds.append(input_fd)
+            read_fds = [input_fd] if input_fd is not None else []
 
             # Check for data from input FIFO
             if read_fds:
@@ -508,22 +569,18 @@ def non_interactive_console(console, input_fifo=None, output_fd=None, timeout=60
 
             # Read from FIFO and send to console
             if input_fd in readable:
-                try:
-                    data = os.read(input_fd, 1024)
-                    if data:
-                        console.write(data)
-                        quiet_time = 0  # Reset quiet timer on input
-                except OSError:
-                    # EAGAIN/EWOULDBLOCK
-                    pass
+                data, _ = _read_from_input(input_fd, input_fifo, check_ctrl_bracket=False)
+                if data:
+                    console.write(data)
+                    quiet_time = 0  # Reset quiet timer on input
 
             # Read from console and write to file
-            try:
-                data = console.read(timeout=0.05, max_size=4096)
+            data = _read_from_console(console)
+            if data:
                 if output_fd:
                     os.write(output_fd, data)
                 quiet_time = 0
-            except Exception:
+            else:
                 # Timeout on read
                 quiet_time += 1
                 # Exit after 5 seconds of no output (only if timeout > 0)
