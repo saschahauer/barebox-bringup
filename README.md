@@ -1,12 +1,11 @@
 # barebox-bringup
 
-A Python tool that makes it easy to bring up [barebox](https://barebox.org) on both emulated and real hardware using [labgrid](https://labgrid.readthedocs.io/).
+A Python tool that makes it easy to bring up [barebox](https://barebox.org) on real hardware using [labgrid](https://labgrid.readthedocs.io/).
 
 ## Overview
 
-`barebox-bringup` simplifies the process of testing barebox on various platforms:
+`barebox-bringup` simplifies the process of testing barebox on physical hardware:
 
-- **Emulated Hardware**: Works seamlessly with QEMU using the barebox-provided labgrid configuration files found in the `test/` directory of the [barebox repository](https://git.pengutronix.de/cgit/barebox)
 - **Real Hardware**: Brings up barebox on physical boards using labgrid for hardware control, power cycling, and serial console access
 
 The tool provides both interactive console access and automated testing modes, with support for logging, programmatic control via FIFOs, and flexible configuration.
@@ -14,11 +13,11 @@ The tool provides both interactive console access and automated testing modes, w
 ## Features
 
 - Interactive and non-interactive console modes
-- Support for both QEMU emulation and real hardware targets
+- Support for real hardware targets
 - Console output logging
 - FIFO-based command injection for automation
 - Automatic target bootstrapping via labgrid strategies
-- Works with existing barebox labgrid test configurations
+- Works with labgrid configuration files
 
 ## Installation
 
@@ -36,16 +35,7 @@ pip3 install -e .
 
 ## Quick Start
 
-### Using with barebox QEMU configurations
-
-The barebox repository includes ready-to-use labgrid configuration files in the `test/` directory. To test barebox on a QEMU-emulated ARM board:
-
-```bash
-# From your barebox source directory
-barebox-bringup -c test/arm/virt@multi_v8_defconfig.yaml
-```
-
-### Basic interactive mode (real hardware)
+### Basic interactive mode
 
 ```bash
 barebox-bringup -c test/arm/imx6s-riotboard.yaml
@@ -98,16 +88,14 @@ barebox-bringup -c test/arm/imx6s-riotboard.yaml --image /path/to/custom-barebox
 
 - Python 3.7+
 - [labgrid](https://github.com/labgrid-project/labgrid) - Hardware control and testing framework
-- For QEMU targets: QEMU (typically `qemu-system-arm`, `qemu-system-aarch64`, etc.)
-- For hardware targets: Appropriate labgrid exporter and hardware setup
+- Appropriate labgrid exporter and hardware setup
 
 ## How It Works
 
-1. Loads a labgrid configuration file (YAML) that describes the target hardware or QEMU setup
-2. Activates the console driver (serial port for hardware, QEMU stdio for emulation)
-3. For hardware: Optionally power-cycles the target and uses labgrid strategies to reach barebox
-4. For QEMU: Starts the emulator with the configured options
-5. Provides interactive console access or automated testing mode
+1. Loads a labgrid configuration file (YAML) that describes the target hardware
+2. Activates the console driver (serial port)
+3. Optionally power-cycles the target and uses labgrid strategies to reach barebox
+4. Provides interactive console access or automated testing mode
 
 ## Contributing
 

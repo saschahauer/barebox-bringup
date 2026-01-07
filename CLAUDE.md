@@ -2,7 +2,7 @@
 
 ## What This Tool Does
 
-`barebox-bringup` is a Python CLI utility for bringing up [barebox](https://barebox.org) bootloader on both emulated (QEMU) and real hardware platforms. It leverages [labgrid](https://labgrid.readthedocs.io/) for hardware control and automation.
+`barebox-bringup` is a Python CLI utility for bringing up [barebox](https://barebox.org) bootloader on real hardware platforms. It leverages [labgrid](https://labgrid.readthedocs.io/) for hardware control and automation.
 
 ## Key Components
 
@@ -12,30 +12,19 @@ The main entry point provides:
 - Non-interactive mode (output-only, for automation)
 - FIFO-based command injection for programmatic control
 - Console output logging
-- Support for QEMU and real hardware targets
+- Support for real hardware targets
 - Power cycling and bootstrap strategies via labgrid
 
 ### Architecture
 
 1. **Configuration Loading**: Reads labgrid YAML configs describing target hardware
-2. **Console Activation**: Activates console driver (serial for hardware, stdio for QEMU)
-3. **Target Bootstrap**:
-   - Hardware: Uses labgrid strategies to power cycle and reach barebox
-   - QEMU: Starts emulator with appropriate options
+2. **Console Activation**: Activates console driver (serial)
+3. **Target Bootstrap**: Uses labgrid strategies to power cycle and reach barebox
 4. **Console Modes**: Provides interactive or automated console access
 
 ## Typical Workflows
 
-### QEMU Testing (Development)
-```bash
-# From barebox source directory with built images
-barebox-bringup -c test/arm/virt@multi_v8_defconfig.yaml
-```
-- Uses labgrid configs from barebox's `test/` directory
-- Auto-detects build output via `LG_BUILDDIR` (or `KBUILD_OUTPUT`)
-- Starts QEMU with `-nographic` for console access
-
-### Hardware Testing (Lab)
+### Hardware Testing
 ```bash
 barebox-bringup -c examples/arm/imx6s-riotboard.yaml
 ```
@@ -152,11 +141,6 @@ target.activate(console)  # Activate first
 power.cycle()            # Then power cycle
 ```
 
-### QEMU Handling
-QEMU targets require special handling:
-- Add `-nographic` to `extra_args` before activation
-- Console driver doubles as power control (`.on()` starts QEMU)
-
 ### TTY Detection
 The tool properly handles both TTY and non-TTY stdin:
 ```python
@@ -168,8 +152,7 @@ if os.isatty(input_fd):
 
 - Python 3.7+
 - labgrid (hardware control framework)
-- QEMU (for emulation testing)
-- For hardware: labgrid coordinator + exporters with appropriate hardware
+- labgrid coordinator + exporters with appropriate hardware
 
 ## Testing Philosophy
 

@@ -699,55 +699,42 @@ def setup_coordinator_session(env, coordinator_address, proxy_address, place_nam
     return loop, session, place_acquired
 
 
-def bootstrap_target(target, console, is_qemu, args):
-    """Bootstrap target hardware or QEMU
+def bootstrap_target(target, console, args):
+    """Bootstrap target hardware
 
     Args:
         target: Target object
         console: Console driver
-        is_qemu: True if QEMU target
         args: Parsed command-line arguments
     """
-    if is_qemu:
-        # QEMU: console is also the power control
+    # Hardware: use strategy
+    # First check if strategy driver exists
+    try:
+        strategy = target.get_driver(Strategy)
+    except Exception as e:
+        # No strategy configured - console-only mode
+        print("No strategy configured - console ready for manual control")
+        if args.verbose:
+            print(f"  (No strategy driver: {e})")
+        strategy = None
+
+    # If strategy exists, use it - any errors should bail out
+    if strategy:
         if not args.no_power_cycle:
-            # Start QEMU execution
-            print("Starting QEMU...")
-            console.on()
-            print("QEMU is running!")
+            print("Bootstrapping target...")
+            try:
+                strategy.transition('barebox')
+            except Exception as e:
+                # Strategy failed - this is a fatal error
+                print(f"Error: Strategy failed: {e}")
+                raise
+            print("Target is ready!")
         else:
-            print("Skipping QEMU start (--no-power-cycle)")
-            if not console.status:
-                print("Warning: QEMU is not running, consider removing --no-power-cycle")
-    else:
-        # Hardware: use strategy
-        # First check if strategy driver exists
-        try:
-            strategy = target.get_driver(Strategy)
-        except Exception as e:
-            # No strategy configured - console-only mode
-            print("No strategy configured - console ready for manual control")
-            if args.verbose:
-                print(f"  (No strategy driver: {e})")
-            strategy = None
-
-        # If strategy exists, use it - any errors should bail out
-        if strategy:
-            if not args.no_power_cycle:
-                print("Bootstrapping target...")
-                try:
-                    strategy.transition('barebox')
-                except Exception as e:
-                    # Strategy failed - this is a fatal error
-                    print(f"Error: Strategy failed: {e}")
-                    raise
-                print("Target is ready!")
-            else:
-                print("Skipping power cycle (--no-power-cycle)")
-                print("Target should already be running")
+            print("Skipping power cycle (--no-power-cycle)")
+            print("Target should already be running")
 
 
-def cleanup_resources(console, target, is_qemu, session, loop, place_name,
+def cleanup_resources(console, target, session, loop, place_name,
                       place_acquired, output_fd, input_fifo, fifo_created,
                       env, verbose=False):
     """Cleanup all resources on exit
@@ -755,7 +742,6 @@ def cleanup_resources(console, target, is_qemu, session, loop, place_name,
     Args:
         console: Console driver (or None)
         target: Target object (or None)
-        is_qemu: True if QEMU target
         session: ClientSession object (or None)
         loop: Event loop (or None)
         place_name: Place name (or None)
@@ -767,38 +753,33 @@ def cleanup_resources(console, target, is_qemu, session, loop, place_name,
         verbose: If True, print additional error details
     """
     # Power off the target before cleanup
-    if console:
+    if console and target:
         try:
-            if is_qemu:
-                # QEMU: use console.off() to shut down
-                print("Shutting down QEMU...")
-                console.off()
-            else:
-                # Hardware: try strategy first (handles multiple power sources),
-                # then fall back to PowerProtocol for simple cases
-                powered_off = False
+            # Hardware: try strategy first (handles multiple power sources),
+            # then fall back to PowerProtocol for simple cases
+            powered_off = False
 
-                # Try strategy transition to 'off' state
+            # Try strategy transition to 'off' state
+            try:
+                strategy = target.get_driver(Strategy, activate=False)
+                if strategy:
+                    print("Powering off target via strategy...")
+                    strategy.transition('off')
+                    powered_off = True
+            except Exception:
+                # Strategy not available or doesn't support 'off' state
+                pass
+
+            # Fallback: use PowerProtocol directly (for non-strategy configs)
+            if not powered_off:
                 try:
-                    strategy = target.get_driver(Strategy, activate=False)
-                    if strategy:
-                        print("Powering off target via strategy...")
-                        strategy.transition('off')
-                        powered_off = True
-                except Exception:
-                    # Strategy not available or doesn't support 'off' state
-                    pass
-
-                # Fallback: use PowerProtocol directly (for non-strategy configs)
-                if not powered_off:
-                    try:
-                        power = target.get_driver(PowerProtocol, activate=False)
-                        print("Powering off target...")
-                        power.off()
-                    except Exception as e:
-                        # No power driver or power off failed
-                        if verbose:
-                            print(f"  (Could not power off: {e})")
+                    power = target.get_driver(PowerProtocol, activate=False)
+                    print("Powering off target...")
+                    power.off()
+                except Exception as e:
+                    # No power driver or power off failed
+                    if verbose:
+                        print(f"  (Could not power off: {e})")
         except Exception as e:
             print(f"Warning: Failed to power off target: {e}")
 
@@ -878,7 +859,6 @@ def main():
     loop = None
     target = None
     console = None
-    is_qemu = False
 
     try:
         # Auto-detect LG_BUILDDIR if not set
@@ -947,28 +927,8 @@ def main():
         # Get console driver (but don't activate yet)
         console = target.get_driver(ConsoleProtocol, activate=False)
 
-        # Check if this is a QEMU target (special handling needed)
-        try:
-            from labgrid.driver import QEMUDriver
-            is_qemu = isinstance(console, QEMUDriver)
-        except ImportError:
-            pass  # is_qemu remains False
-
-        if is_qemu:
-            # QEMU: add -nographic BEFORE activation
-            print("Detected QEMU target")
-            if '-nographic' not in console.extra_args:
-                console.extra_args += ' -nographic'
-                if args.verbose:
-                    print("Added -nographic option")
-
-            # CRITICAL: Activate console FIRST (before power cycle)
-            # This ensures we capture ALL boot output including bootrom
-            print("Activating console...")
-            target.activate(console)
-
-        # Bootstrap target (QEMU or hardware)
-        bootstrap_target(target, console, is_qemu, args)
+        # Bootstrap target hardware
+        bootstrap_target(target, console, args)
 
         # Enter appropriate console mode
         timeout = args.timeout if args.timeout is not None else 0
@@ -994,7 +954,6 @@ def main():
         cleanup_resources(
             console=console,
             target=target,
-            is_qemu=is_qemu,
             session=session,
             loop=loop,
             place_name=place_name,
