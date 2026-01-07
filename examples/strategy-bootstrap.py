@@ -1,22 +1,17 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 import enum
+import sys
+from pathlib import Path
 
 import attr
 
 from labgrid import target_factory, step
 from labgrid.strategy import Strategy, StrategyError
 
-# Try to import never_retry, but provide a fallback if not available
-try:
-    from labgrid.strategy import never_retry
-except ImportError:
-    try:
-        from labgrid.strategy.common import never_retry
-    except ImportError:
-        # Fallback: define a no-op decorator if never_retry is not available
-        def never_retry(func):
-            return func
+# Import never_retry from barebox_bringup (handles version compatibility)
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from barebox_bringup.strategy_utils import never_retry
 
 
 class BootstrapStatus(enum.Enum):
