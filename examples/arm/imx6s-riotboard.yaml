@@ -20,7 +20,7 @@ targets:
         prompt: 'barebox@[^:]+:[^ ]+ '
         bootstring: 'commandline:'
     - BootstrapStrategy: {}
-images:
+image-sets:
   default:
     barebox-embest-imx6s-riotboard.img: !template "$LG_BUILDDIR/images/barebox-embest-imx6s-riotboard.img"
 imports:

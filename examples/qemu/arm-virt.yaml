@@ -1,0 +1,29 @@
+# QEMU ARM virt machine configuration for barebox
+# This configuration demonstrates 32-bit ARM barebox testing with QEMU
+#
+# Usage:
+#   barebox-bringup -c examples/qemu/arm-virt.yaml
+#
+# Requirements:
+#   - qemu-system-arm installed
+#   - barebox built with multi_v7_defconfig (or similar ARM config)
+
+targets:
+  main:
+    drivers:
+      QEMUDriver:
+        qemu_bin: qemu-system-arm
+        machine: virt
+        cpu: cortex-a15
+        memory: 512M
+        kernel: barebox-dt-2nd.img
+        display: qemu-default
+
+      QEMUStrategy: {}
+
+image-sets:
+  default:
+    barebox-dt-2nd.img: !template "$LG_BUILDDIR/images/barebox-dt-2nd.img"
+
+imports:
+  - ../strategy-qemu.py

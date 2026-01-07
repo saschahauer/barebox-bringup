@@ -1,0 +1,64 @@
+# QEMU ARM64 virt machine configuration for barebox
+# This configuration demonstrates how to use barebox-bringup with QEMU
+#
+# Usage:
+#   # From barebox source directory with built images
+#   barebox-bringup -c examples/qemu/arm64-virt.yaml
+#
+# Requirements:
+#   - qemu-system-aarch64 installed
+#   - barebox built with multi_v8_defconfig (or similar ARM64 config)
+#   - LG_BUILDDIR set to barebox build directory (auto-detected)
+#
+# Features:
+#   - QEMU virt machine with Cortex-A57 CPU
+#   - 1GB RAM
+#   - Automatic console access
+#   - Image path template using $LG_BUILDDIR
+
+targets:
+  main:
+    drivers:
+      # QEMU driver configuration
+      # The QEMUDriver acts as both console and power control
+      QEMUDriver:
+        qemu_bin: qemu-system-aarch64
+        machine: virt,highmem=off
+        cpu: cortex-a57
+        memory: 1024M
+        kernel: barebox-dt-2nd.img
+        display: qemu-default
+        # extra_args will have -nographic added automatically by barebox-bringup
+
+      # Barebox driver for console interaction
+      # (Optional - useful for automated testing, not required for basic console access)
+      # BareboxDriver:
+      #   prompt: 'barebox@[^:]+:[^ ]+ '
+      #   bootstring: 'commandline:'
+
+      # Strategy for managing QEMU lifecycle
+      QEMUStrategy: {}
+
+# Image configuration using image sets
+# Supports multiple named sets for different purposes
+image-sets:
+  # Default image set (used when no --images specified)
+  default:
+    barebox-dt-2nd.img: !template "$LG_BUILDDIR/images/barebox-dt-2nd.img"
+
+  # Example: known-good image set for testing
+  # Uncomment and customize for your use case
+  # known_good:
+  #   barebox-dt-2nd.img: "/path/to/validated/barebox-dt-2nd.img"
+
+  # Example: Yocto build image set (auto-selected when BBPATH is set)
+  # yocto:
+  #   barebox-dt-2nd.img: !template "$BBPATH/../build/tmp/deploy/images/qemuarm64/barebox-dt-2nd.img"
+
+# Import the QEMU strategy
+imports:
+  - ../strategy-qemu.py
+
+# Optional coordinator configuration (not needed for local QEMU)
+# options:
+#   coordinator_address: 127.0.0.1:20408

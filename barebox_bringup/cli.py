@@ -208,6 +208,11 @@ def load_environment(config_file, coordinator=None, proxy=None, image_overrides=
         2. BBPATH environment variable set -> use 'yocto'
         3. Default to 'default'
 
+        Configuration format:
+        New format uses 'image-sets:' with nested named sets:
+        - image-sets: { default: {...}, known_good: {...} }
+        Old format uses 'images:' with flat dict (backwards compatible)
+
         Image overrides:
         Supports two formats:
         - Named: "name=path" - Override specific image by name
@@ -234,22 +239,22 @@ def load_environment(config_file, coordinator=None, proxy=None, image_overrides=
     if proxy:
         env.config.set_option('proxy', proxy)
 
-    # Handle --images: select named image set from images
+    # Handle --images: select named image set from image-sets
     # This must happen BEFORE image overrides so overrides can modify the selected set
-    images = env.config.data.get('images')
-    image = env.config.data.get('image')  # Old format fallback
+    image_sets = env.config.data.get('image-sets')
+    images = env.config.data.get('images')  # Old format fallback
 
-    if images:
+    if image_sets:
         # New format with image sets
-        # Expected: images: { default: { img1: path1 }, known_good: { img1: path1 } }
-        if image_set not in images:
-            available = ', '.join(sorted(images.keys()))
+        # Expected: image-sets: { default: { img1: path1 }, known_good: { img1: path1 } }
+        if image_set not in image_sets:
+            available = ', '.join(sorted(image_sets.keys()))
             print(f"Error: Image set '{image_set}' not found in config")
             print(f"Available image sets: {available}")
             sys.exit(1)
 
         # Select the requested image set
-        selected_images = images[image_set]
+        selected_images = image_sets[image_set]
 
         if not selected_images:
             print(f"Error: Image set '{image_set}' exists but contains no images")
@@ -258,17 +263,17 @@ def load_environment(config_file, coordinator=None, proxy=None, image_overrides=
         # Place selected images into the 'images' section for labgrid to use
         env.config.data['images'] = selected_images.copy()
         logging.info(f"Using image set '{image_set}' with images: {', '.join(selected_images.keys())}")
-    elif image:
-        # Fallback to old 'image:' key (singular)
+    elif images:
+        # Fallback to old 'images:' key (flat dict, no sets)
         if image_set != 'default':
-            print(f"Warning: Config uses old 'image:' format, ignoring --images '{image_set}'")
-            print("To use image sets, update config to: images: { default: {...}, known_good: {...} }")
-        logging.info(f"Using images from 'image:' section (old format): {', '.join(image.keys())}")
-        # Copy to 'images' for labgrid compatibility
-        env.config.data['images'] = image.copy()
+            print(f"Warning: Config uses old 'images:' format, ignoring --images '{image_set}'")
+            print("To use image sets, update config to: image-sets: { default: {...}, known_good: {...} }")
+        logging.info(f"Using images from 'images:' section (old format): {', '.join(images.keys())}")
+        # Already in 'images' for labgrid compatibility, just ensure it's a copy
+        env.config.data['images'] = images.copy()
     else:
-        print("Error: No 'images:' or 'image:' section found in config")
-        print("Expected format: images: { default: {...}, known_good: {...}, ... }")
+        print("Error: No 'image-sets:' or 'images:' section found in config")
+        print("Expected format: image-sets: { default: {...}, known_good: {...}, ... }")
         sys.exit(1)
 
     # Override image paths if --image was specified

@@ -52,7 +52,7 @@ targets:
       # SD-MUX Strategy (orchestrates the boot process)
       - SDMuxStrategy: {}
 
-images:
+image-sets:
   # Default image set (used if no --images specified)
   default:
     # Single image to write to SD card

@@ -1,0 +1,30 @@
+# QEMU x86 PC configuration for barebox
+# This configuration demonstrates x86 barebox testing with QEMU
+#
+# Usage:
+#   barebox-bringup -c examples/qemu/x86-pc.yaml
+#
+# Requirements:
+#   - qemu-system-x86_64 installed
+#   - barebox built with efi_defconfig or similar x86 config
+
+targets:
+  main:
+    drivers:
+      QEMUDriver:
+        qemu_bin: qemu-system-x86_64
+        machine: pc
+        cpu: qemu64
+        memory: 1024M
+        kernel: barebox.efi
+        display: qemu-default
+        bios: /usr/share/ovmf/OVMF.fd  # UEFI firmware (adjust path for your system)
+
+      QEMUStrategy: {}
+
+image-sets:
+  default:
+    barebox.efi: !template "$LG_BUILDDIR/images/barebox.efi"
+
+imports:
+  - ../strategy-qemu.py

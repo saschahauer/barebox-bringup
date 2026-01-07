@@ -46,7 +46,7 @@ echo "help" > /tmp/commands.fifo
 See `examples/arm/imx6s-riotboard.yaml` for reference structure:
 - `targets`: Hardware resources and drivers
 - `drivers`: Console, power, bootstrap drivers
-- `images`: Named sets of barebox images (e.g., default, known_good, testing)
+- `image-sets`: Named sets of barebox images (e.g., default, known_good, testing)
   - Each set contains image names mapped to paths
   - Supports `$LG_BUILDDIR` template variable
   - Use `--images <name>` CLI option to select a set (defaults to 'default')
@@ -57,7 +57,7 @@ See `examples/arm/imx6s-riotboard.yaml` for reference structure:
 The configuration supports multiple named image sets for different purposes:
 
 ```yaml
-images:
+image-sets:
   default:
     barebox.img: !template "$LG_BUILDDIR/images/barebox-board.img"
 
@@ -85,7 +85,7 @@ barebox-bringup -c config.yaml --images testing
 When the `BBPATH` environment variable is set (indicating you're inside a Yocto build environment), the tool automatically selects the `yocto` image set instead of `default`:
 
 ```yaml
-images:
+image-sets:
   default:
     barebox.img: !template "$LG_BUILDDIR/images/barebox-board.img"
 
@@ -109,15 +109,15 @@ barebox-bringup -c ~/labgrid-places/arm/myboard.yaml --images known_good
 ```
 
 #### Backward Compatibility
-The tool supports the old singular `image:` key for backward compatibility:
+The tool supports the old flat `images:` key for backward compatibility:
 
 ```yaml
-# Old format (still supported, treated as 'default' set)
-image:
+# Old format (still supported, flat dict without sets)
+images:
   barebox.img: !template "$LG_BUILDDIR/images/barebox.img"
 ```
 
-When using old format configs with `image:`, the `--images` option is ignored with a warning, and the images are used as the default set.
+When using old format configs with flat `images:`, the `--images` option is ignored with a warning, and the images are used as the default set.
 
 ### Example Strategy (`examples/strategy-bootstrap.py`)
 Custom labgrid strategy for bootstrap-based targets:
