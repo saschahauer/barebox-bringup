@@ -21,7 +21,8 @@ targets:
         bootstring: 'commandline:'
     - BootstrapStrategy: {}
 images:
-  barebox-embest-imx6s-riotboard.img: !template "$LG_BUILDDIR/images/barebox-embest-imx6s-riotboard.img"
+  default:
+    barebox-embest-imx6s-riotboard.img: !template "$LG_BUILDDIR/images/barebox-embest-imx6s-riotboard.img"
 imports:
   - ../strategy-bootstrap.py
 options:

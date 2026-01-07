@@ -57,9 +57,50 @@ echo "help" > /tmp/commands.fifo
 See `examples/arm/imx6s-riotboard.yaml` for reference structure:
 - `targets`: Hardware resources and drivers
 - `drivers`: Console, power, bootstrap drivers
-- `images`: Barebox images to load (uses `$LG_BUILDDIR` template)
+- `images`: Named sets of barebox images (e.g., default, known_good, testing)
+  - Each set contains image names mapped to paths
+  - Supports `$LG_BUILDDIR` template variable
+  - Use `--images <name>` CLI option to select a set (defaults to 'default')
 - `imports`: Custom strategies (like `strategy-bootstrap.py`)
 - `options`: Coordinator address, etc.
+
+### Image Sets
+The configuration supports multiple named image sets for different purposes:
+
+```yaml
+images:
+  default:
+    barebox.img: !template "$LG_BUILDDIR/images/barebox-board.img"
+
+  known_good:
+    barebox.img: "/validated/barebox-v2024.01.0.img"
+
+  testing:
+    barebox.img: "/experimental/barebox-next.img"
+```
+
+Usage:
+```bash
+# Use default image set (implicit)
+barebox-bringup -c config.yaml
+
+# Use known-good image set
+barebox-bringup -c config.yaml --images known_good
+
+# Use testing image set
+barebox-bringup -c config.yaml --images testing
+```
+
+#### Backward Compatibility
+The tool supports the old singular `image:` key for backward compatibility:
+
+```yaml
+# Old format (still supported, treated as 'default' set)
+image:
+  barebox.img: !template "$LG_BUILDDIR/images/barebox.img"
+```
+
+When using old format configs with `image:`, the `--images` option is ignored with a warning, and the images are used as the default set.
 
 ### Example Strategy (`examples/strategy-bootstrap.py`)
 Custom labgrid strategy for bootstrap-based targets:

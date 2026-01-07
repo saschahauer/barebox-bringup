@@ -45,8 +45,11 @@ Examples:
   # Override multiple images from config file (named)
   %(prog)s -c test/arm/vusion-ugate.yaml --image tiboot3.img=/path/to/tiboot3.img --image barebox-proper.img=/path/to/barebox.img
 
-  # Use known-good images from config file
-  %(prog)s -c test/arm/vusion-ugate.yaml --known-good
+  # Use known-good image set from config file
+  %(prog)s -c test/arm/vusion-ugate.yaml --images known_good
+
+  # Use testing image set from config file
+  %(prog)s -c test/arm/vusion-ugate.yaml --images testing
 
   # Interactive with auto-created FIFO for programmatic control
   %(prog)s -c test/arm/imx6s-riotboard.yaml -i -o boot.log &
@@ -90,8 +93,8 @@ Examples:
                         help='Timeout in seconds for operations (default: no timeout)')
     parser.add_argument('--image', action='append', dest='images',
                         help='Override image: --image name=path or --image path (for single image configs)')
-    parser.add_argument('-g', '--known-good', action='store_true',
-                        help='Use known-good images from config (known_good_images: section)')
+    parser.add_argument('--images', type=str, default='default', dest='image_set',
+                        help='Select named image set from config (default: default)')
     parser.add_argument('--no-write', action='store_true',
                         help='Skip writing images to SD card, boot from existing card (SD-MUX only)')
 
@@ -146,7 +149,7 @@ def setup_input_fifo(input_arg):
             return input_arg, True
 
 
-def load_environment(config_file, coordinator=None, proxy=None, image_overrides=None, use_known_good=False, no_write=False):
+def load_environment(config_file, coordinator=None, proxy=None, image_overrides=None, image_set='default', no_write=False):
     """Load labgrid environment from configuration file
 
     Args:
@@ -203,7 +206,45 @@ def load_environment(config_file, coordinator=None, proxy=None, image_overrides=
     if proxy:
         env.config.set_option('proxy', proxy)
 
+    # Handle --images: select named image set from images
+    # This must happen BEFORE image overrides so overrides can modify the selected set
+    images = env.config.data.get('images')
+    image = env.config.data.get('image')  # Old format fallback
+
+    if images:
+        # New format with image sets
+        # Expected: images: { default: { img1: path1 }, known_good: { img1: path1 } }
+        if image_set not in images:
+            available = ', '.join(sorted(images.keys()))
+            print(f"Error: Image set '{image_set}' not found in config")
+            print(f"Available image sets: {available}")
+            sys.exit(1)
+
+        # Select the requested image set
+        selected_images = images[image_set]
+
+        if not selected_images:
+            print(f"Error: Image set '{image_set}' exists but contains no images")
+            sys.exit(1)
+
+        # Place selected images into the 'images' section for labgrid to use
+        env.config.data['images'] = selected_images.copy()
+        logging.info(f"Using image set '{image_set}' with images: {', '.join(selected_images.keys())}")
+    elif image:
+        # Fallback to old 'image:' key (singular)
+        if image_set != 'default':
+            print(f"Warning: Config uses old 'image:' format, ignoring --images '{image_set}'")
+            print("To use image sets, update config to: images: { default: {...}, known_good: {...} }")
+        logging.info(f"Using images from 'image:' section (old format): {', '.join(image.keys())}")
+        # Copy to 'images' for labgrid compatibility
+        env.config.data['images'] = image.copy()
+    else:
+        print("Error: No 'images:' or 'image:' section found in config")
+        print("Expected format: images: { default: {...}, known_good: {...}, ... }")
+        sys.exit(1)
+
     # Override image paths if --image was specified
+    # This happens AFTER image set selection so overrides are applied to the selected set
     if image_overrides:
         images = env.config.get_images()
         if not images:
@@ -227,35 +268,6 @@ def load_environment(config_file, coordinator=None, proxy=None, image_overrides=
                     abs_path = os.path.realpath(override)
                     env.config.data['images'][first_name] = abs_path
                     logging.info(f"Overriding first image '{first_name}' with {abs_path}")
-
-    # Handle --known-good flag: replace images with known-good versions
-    if use_known_good:
-        regular_images = env.config.data.get('images', {})
-        known_good_images = env.config.data.get('known_good_images', {})
-
-        if not regular_images:
-            logging.warning("No images defined in config, --known-good ignored")
-        elif not known_good_images:
-            print("Error: --known-good specified but no 'known_good_images:' section found in config")
-            sys.exit(1)
-        else:
-            # Validate: ALL regular images must have known-good versions
-            missing = []
-            for image_name in regular_images.keys():
-                if image_name not in known_good_images:
-                    missing.append(image_name)
-
-            if missing:
-                print(f"Error: --known-good specified but the following images lack known-good versions:")
-                for name in missing:
-                    print(f"  - {name}")
-                print(f"\nKnown-good images defined: {', '.join(known_good_images.keys())}")
-                sys.exit(1)
-
-            # All validations passed - replace images with known-good versions
-            # Note: known_good_images already have templates resolved by Config
-            env.config.data['images'] = known_good_images.copy()
-            logging.info(f"Using known-good images for: {', '.join(known_good_images.keys())}")
 
     # Set no_write option if --no-write was specified
     if no_write:
@@ -855,7 +867,7 @@ def main():
 
         # Load labgrid environment
         print(f"Loading configuration: {args.config}")
-        env = load_environment(args.config, args.coordinator, args.proxy, args.images, args.known_good, args.no_write)
+        env = load_environment(args.config, args.coordinator, args.proxy, args.images, args.image_set, args.no_write)
 
         if args.images:
             for override in args.images:
@@ -865,9 +877,9 @@ def main():
                 else:
                     print(f"Image override (first): {override}")
 
-        if args.known_good:
+        if args.image_set != 'default':
             images = env.config.get_images()
-            print(f"Using known-good images:")
+            print(f"Using image set '{args.image_set}':")
             for name, path in images.items():
                 print(f"  - {name}: {path}")
 

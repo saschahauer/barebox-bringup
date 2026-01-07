@@ -12,8 +12,11 @@
 #   - NetworkPowerPort (power control)
 #
 # Usage:
-#   # Write image and boot
+#   # Write image and boot (uses default image set)
 #   barebox-bringup -c examples/arm/sdmux-example.yaml
+#
+#   # Use known-good image set
+#   barebox-bringup -c examples/arm/sdmux-example.yaml --images known_good
 #
 #   # Boot from existing SD card (skip writing)
 #   barebox-bringup -c examples/arm/sdmux-example.yaml --no-write
@@ -50,16 +53,21 @@ targets:
       - SDMuxStrategy: {}
 
 images:
-  # Single image to write to SD card
-  # Use $LG_BUILDDIR for barebox build output
-  barebox.img: !template "$LG_BUILDDIR/images/barebox-my-board.img"
+  # Default image set (used if no --images specified)
+  default:
+    # Single image to write to SD card
+    # Use $LG_BUILDDIR for barebox build output
+    barebox.img: !template "$LG_BUILDDIR/images/barebox-my-board.img"
+    # Or use absolute path
+    # barebox.img: "/path/to/barebox.img"
 
-  # Or use absolute path
-  # barebox.img: "/path/to/barebox.img"
+  # Known-good image set (use with --images known_good)
+  known_good:
+    barebox.img: "/path/to/validated/barebox.img"
 
-# Optional: Known-good images for --known-good flag
-known_good_images:
-  barebox.img: "/path/to/validated/barebox.img"
+  # Example: testing image set (use with --images testing)
+  # testing:
+  #   barebox.img: "/path/to/experimental/barebox.img"
 
 imports:
   - ../strategy-sdmux.py
