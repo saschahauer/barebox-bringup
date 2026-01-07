@@ -3,7 +3,6 @@
 import enum
 
 import attr
-import pexpect
 
 from labgrid import target_factory, step
 from labgrid.strategy import Strategy, StrategyError
@@ -65,7 +64,6 @@ class BootstrapStrategy(Strategy):
 
     def __attrs_post_init__(self):
         super().__attrs_post_init__()
-        self.healthy = False
 
     @never_retry
     @step(args=['status'])

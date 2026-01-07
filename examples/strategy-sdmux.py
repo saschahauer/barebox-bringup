@@ -62,9 +62,6 @@ class SDMuxStrategy(Strategy):
     status = attr.ib(default=SDMuxStatus.unknown)
     bootstrap_done = attr.ib(default=False, init=False)
 
-    def __attrs_post_init__(self):
-        super().__attrs_post_init__()
-
     @never_retry
     @step(args=['status'])
     def transition(self, status, *, step):
