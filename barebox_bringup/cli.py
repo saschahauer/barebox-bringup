@@ -707,6 +707,111 @@ def bootstrap_target(target, console, is_qemu, args):
                 print("Target should already be running")
 
 
+def cleanup_resources(console, target, is_qemu, session, loop, place_name,
+                      place_acquired, output_fd, input_fifo, fifo_created,
+                      env, verbose=False):
+    """Cleanup all resources on exit
+
+    Args:
+        console: Console driver (or None)
+        target: Target object (or None)
+        is_qemu: True if QEMU target
+        session: ClientSession object (or None)
+        loop: Event loop (or None)
+        place_name: Place name (or None)
+        place_acquired: True if we acquired the place
+        output_fd: Output file descriptor (or None)
+        input_fifo: Input FIFO path (or None)
+        fifo_created: True if we created the FIFO
+        env: Environment object (or None)
+        verbose: If True, print additional error details
+    """
+    # Power off the target before cleanup
+    if console:
+        try:
+            if is_qemu:
+                # QEMU: use console.off() to shut down
+                print("Shutting down QEMU...")
+                console.off()
+            else:
+                # Hardware: try strategy first (handles multiple power sources),
+                # then fall back to PowerProtocol for simple cases
+                powered_off = False
+
+                # Try strategy transition to 'off' state
+                try:
+                    strategy = target.get_driver(Strategy, activate=False)
+                    if strategy:
+                        print("Powering off target via strategy...")
+                        strategy.transition('off')
+                        powered_off = True
+                except Exception:
+                    # Strategy not available or doesn't support 'off' state
+                    pass
+
+                # Fallback: use PowerProtocol directly (for non-strategy configs)
+                if not powered_off:
+                    try:
+                        power = target.get_driver(PowerProtocol, activate=False)
+                        print("Powering off target...")
+                        power.off()
+                    except Exception as e:
+                        # No power driver or power off failed
+                        if verbose:
+                            print(f"  (Could not power off: {e})")
+        except Exception as e:
+            print(f"Warning: Failed to power off target: {e}")
+
+    # Release place only if we acquired it (not if it was already acquired)
+    if session and place_name and place_acquired and loop:
+        try:
+            print(f"Releasing place {place_name}...")
+            loop.run_until_complete(release_place(session, place_name))
+        except Exception as e:
+            print(f"Warning: Failed to release place: {e}")
+
+    # Stop and close session
+    if session and loop:
+        try:
+            loop.run_until_complete(session.stop())
+            loop.run_until_complete(session.close())
+        except Exception as e:
+            print(f"Warning: Failed to close session: {e}")
+
+    # Close event loop
+    if loop:
+        try:
+            loop.close()
+        except Exception:
+            pass
+
+    # Cleanup files
+    if output_fd is not None:
+        try:
+            os.close(output_fd)
+        except Exception:
+            pass
+
+    if fifo_created and input_fifo:
+        try:
+            os.unlink(input_fifo)
+            print(f"Removed FIFO: {input_fifo}")
+        except Exception:
+            pass
+
+    # Cleanup environment
+    if env:
+        try:
+            env.cleanup()
+        except Exception:
+            pass
+
+    try:
+        StepLogger.stop()
+    except Exception:
+        pass
+
+
 def main():
     """Main program entry point"""
     parser = create_argument_parser()
@@ -841,88 +946,20 @@ def main():
             traceback.print_exc()
         return 1
     finally:
-        # Power off the target before cleanup
-        if console:
-            try:
-                if is_qemu:
-                    # QEMU: use console.off() to shut down
-                    print("Shutting down QEMU...")
-                    console.off()
-                else:
-                    # Hardware: try strategy first (handles multiple power sources),
-                    # then fall back to PowerProtocol for simple cases
-                    powered_off = False
-
-                    # Try strategy transition to 'off' state
-                    try:
-                        strategy = target.get_driver(Strategy, activate=False)
-                        if strategy:
-                            print("Powering off target via strategy...")
-                            strategy.transition('off')
-                            powered_off = True
-                    except Exception:
-                        # Strategy not available or doesn't support 'off' state
-                        pass
-
-                    # Fallback: use PowerProtocol directly (for non-strategy configs)
-                    if not powered_off:
-                        try:
-                            power = target.get_driver(PowerProtocol, activate=False)
-                            print("Powering off target...")
-                            power.off()
-                        except Exception as e:
-                            # No power driver or power off failed
-                            if args.verbose:
-                                print(f"  (Could not power off: {e})")
-            except Exception as e:
-                print(f"Warning: Failed to power off target: {e}")
-
-        # Release place only if we acquired it (not if it was already acquired)
-        if session and place_name and place_acquired and loop:
-            try:
-                print(f"Releasing place {place_name}...")
-                loop.run_until_complete(release_place(session, place_name))
-            except Exception as e:
-                print(f"Warning: Failed to release place: {e}")
-
-        # Stop and close session
-        if session and loop:
-            try:
-                loop.run_until_complete(session.stop())
-                loop.run_until_complete(session.close())
-            except Exception as e:
-                print(f"Warning: Failed to close session: {e}")
-
-        # Close event loop
-        if loop:
-            try:
-                loop.close()
-            except Exception:
-                pass
-
-        # Cleanup
-        if output_fd is not None:
-            try:
-                os.close(output_fd)
-            except Exception:
-                pass
-
-        if fifo_created and input_fifo:
-            try:
-                os.unlink(input_fifo)
-                print(f"Removed FIFO: {input_fifo}")
-            except Exception:
-                pass
-
-        if 'env' in locals():
-            try:
-                env.cleanup()
-            except Exception:
-                pass
-        try:
-            StepLogger.stop()
-        except Exception:
-            pass
+        cleanup_resources(
+            console=console,
+            target=target,
+            is_qemu=is_qemu,
+            session=session,
+            loop=loop,
+            place_name=place_name,
+            place_acquired=place_acquired,
+            output_fd=output_fd,
+            input_fifo=input_fifo,
+            fifo_created=fifo_created,
+            env=env if 'env' in locals() else None,
+            verbose=args.verbose if 'args' in locals() else False
+        )
 
 
 if __name__ == '__main__':
