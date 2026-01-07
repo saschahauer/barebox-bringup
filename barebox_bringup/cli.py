@@ -373,10 +373,10 @@ async def acquire_place(session, place_name):
     # Import the protobuf request type
     from labgrid.remote.generated import labgrid_coordinator_pb2
 
-    request = labgrid_coordinator_pb2.AcquirePlaceRequest(placename=place_name)
+    request = labgrid_coordinator_pb2.AcquirePlaceRequest(placename=place.name)
     await session.stub.AcquirePlace(request)
     await session.sync_with_coordinator()
-    print(f"Acquired place {place_name}")
+    print(f"Acquired place {place.name}")
     return True  # We acquired it
 
 
@@ -395,10 +395,10 @@ async def release_place(session, place_name):
     # Import the protobuf request type
     from labgrid.remote.generated import labgrid_coordinator_pb2
 
-    request = labgrid_coordinator_pb2.ReleasePlaceRequest(placename=place_name)
+    request = labgrid_coordinator_pb2.ReleasePlaceRequest(placename=place.name)
     await session.stub.ReleasePlace(request)
     await session.sync_with_coordinator()
-    print(f"Released place {place_name}")
+    print(f"Released place {place.name}")
 
 
 def _open_input_source(input_fifo):
