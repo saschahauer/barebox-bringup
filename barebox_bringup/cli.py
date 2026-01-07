@@ -595,6 +595,118 @@ def non_interactive_console(console, input_fifo=None, output_fd=None, timeout=60
         print("\n=== Console closed ===")
 
 
+def setup_build_directory(verbose=False):
+    """Auto-detect and set LG_BUILDDIR if not already set
+
+    Args:
+        verbose: If True, print the detected directory
+    """
+    if 'LG_BUILDDIR' not in os.environ:
+        if 'KBUILD_OUTPUT' in os.environ:
+            os.environ['LG_BUILDDIR'] = os.environ['KBUILD_OUTPUT']
+        elif os.path.isdir('build'):
+            os.environ['LG_BUILDDIR'] = os.path.realpath('build')
+        else:
+            os.environ['LG_BUILDDIR'] = os.getcwd()
+        if verbose:
+            print(f"Auto-detected LG_BUILDDIR: {os.environ['LG_BUILDDIR']}")
+
+    # Make LG_BUILDDIR absolute
+    if os.environ.get('LG_BUILDDIR'):
+        os.environ['LG_BUILDDIR'] = os.path.realpath(os.environ['LG_BUILDDIR'])
+
+
+def setup_coordinator_session(env, coordinator_address, proxy_address, place_name, args):
+    """Create event loop and connect to coordinator
+
+    Args:
+        env: Environment object
+        coordinator_address: Coordinator address string
+        proxy_address: Proxy address string (or None)
+        place_name: Place name to display in messages
+        args: Parsed command-line arguments
+
+    Returns:
+        tuple: (loop, session) - Event loop and session objects
+    """
+    if proxy_address:
+        proxymanager.force_proxy(proxy_address)
+        print(f"Using proxy: {proxy_address}")
+
+    print(f"Connecting to coordinator at {coordinator_address}...")
+
+    # Create event loop and session
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    extra = {
+        'args': args,
+        'env': env,
+        'role': args.role,
+        'prog': 'barebox-bringup'
+    }
+
+    session = start_session(coordinator_address, extra=extra, loop=loop)
+    print(f"Connected to coordinator")
+
+    # Prepare the RemotePlaceManager before acquiring
+    prepare_manager(session, loop)
+
+    # Acquire the place
+    print(f"Acquiring place {place_name}...")
+    place_acquired = loop.run_until_complete(acquire_place(session, place_name))
+
+    return loop, session, place_acquired
+
+
+def bootstrap_target(target, console, is_qemu, args):
+    """Bootstrap target hardware or QEMU
+
+    Args:
+        target: Target object
+        console: Console driver
+        is_qemu: True if QEMU target
+        args: Parsed command-line arguments
+    """
+    if is_qemu:
+        # QEMU: console is also the power control
+        if not args.no_power_cycle:
+            # Start QEMU execution
+            print("Starting QEMU...")
+            console.on()
+            print("QEMU is running!")
+        else:
+            print("Skipping QEMU start (--no-power-cycle)")
+            if not console.status:
+                print("Warning: QEMU is not running, consider removing --no-power-cycle")
+    else:
+        # Hardware: use strategy
+        # First check if strategy driver exists
+        try:
+            strategy = target.get_driver(Strategy)
+        except Exception as e:
+            # No strategy configured - console-only mode
+            print("No strategy configured - console ready for manual control")
+            if args.verbose:
+                print(f"  (No strategy driver: {e})")
+            strategy = None
+
+        # If strategy exists, use it - any errors should bail out
+        if strategy:
+            if not args.no_power_cycle:
+                print("Bootstrapping target...")
+                try:
+                    strategy.transition('barebox')
+                except Exception as e:
+                    # Strategy failed - this is a fatal error
+                    print(f"Error: Strategy failed: {e}")
+                    raise
+                print("Target is ready!")
+            else:
+                print("Skipping power cycle (--no-power-cycle)")
+                print("Target should already be running")
+
+
 def main():
     """Main program entry point"""
     parser = create_argument_parser()
@@ -624,20 +736,8 @@ def main():
     is_qemu = False
 
     try:
-        # Auto-detect LG_BUILDDIR if not set (same logic as conftest.py)
-        if 'LG_BUILDDIR' not in os.environ:
-            if 'KBUILD_OUTPUT' in os.environ:
-                os.environ['LG_BUILDDIR'] = os.environ['KBUILD_OUTPUT']
-            elif os.path.isdir('build'):
-                os.environ['LG_BUILDDIR'] = os.path.realpath('build')
-            else:
-                os.environ['LG_BUILDDIR'] = os.getcwd()
-            if args.verbose:
-                print(f"Auto-detected LG_BUILDDIR: {os.environ['LG_BUILDDIR']}")
-
-        # Make LG_BUILDDIR absolute
-        if os.environ.get('LG_BUILDDIR'):
-            os.environ['LG_BUILDDIR'] = os.path.realpath(os.environ['LG_BUILDDIR'])
+        # Auto-detect LG_BUILDDIR if not set
+        setup_build_directory(verbose=args.verbose)
 
         # Setup input FIFO if requested
         if args.input is not None:
@@ -683,32 +783,10 @@ def main():
             except (AttributeError, KeyError):
                 proxy_address = os.environ.get('LG_PROXY')
 
-            if proxy_address:
-                proxymanager.force_proxy(proxy_address)
-                print(f"Using proxy: {proxy_address}")
-
-            print(f"Connecting to coordinator at {coordinator_address}...")
-
-            # Create event loop and session
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-            extra = {
-                'args': args,
-                'env': env,
-                'role': args.role,
-                'prog': 'barebox-bringup'
-            }
-
-            session = start_session(coordinator_address, extra=extra, loop=loop)
-            print(f"Connected to coordinator")
-
-            # Prepare the RemotePlaceManager before acquiring
-            prepare_manager(session, loop)
-
-            # Acquire the place
-            print(f"Acquiring place {place_name}...")
-            place_acquired = loop.run_until_complete(acquire_place(session, place_name))
+            # Connect to coordinator and acquire place
+            loop, session, place_acquired = setup_coordinator_session(
+                env, coordinator_address, proxy_address, place_name, args
+            )
 
         # Get target
         target = env.get_target(args.role)
@@ -739,43 +817,8 @@ def main():
         print("Activating console...")
         target.activate(console)
 
-        if is_qemu:
-            # QEMU: console is also the power control
-            if not args.no_power_cycle:
-                # Start QEMU execution
-                print("Starting QEMU...")
-                console.on()
-                print("QEMU is running!")
-            else:
-                print("Skipping QEMU start (--no-power-cycle)")
-                if not console.status:
-                    print("Warning: QEMU is not running, consider removing --no-power-cycle")
-        else:
-            # Hardware: use strategy
-            # First check if strategy driver exists
-            try:
-                strategy = target.get_driver(Strategy)
-            except Exception as e:
-                # No strategy configured - console-only mode
-                print("No strategy configured - console ready for manual control")
-                if args.verbose:
-                    print(f"  (No strategy driver: {e})")
-                strategy = None
-
-            # If strategy exists, use it - any errors should bail out
-            if strategy:
-                if not args.no_power_cycle:
-                    print("Bootstrapping target...")
-                    try:
-                        strategy.transition('barebox')
-                    except Exception as e:
-                        # Strategy failed - this is a fatal error
-                        print(f"Error: Strategy failed: {e}")
-                        raise
-                    print("Target is ready!")
-                else:
-                    print("Skipping power cycle (--no-power-cycle)")
-                    print("Target should already be running")
+        # Bootstrap target (QEMU or hardware)
+        bootstrap_target(target, console, is_qemu, args)
 
         # Enter appropriate console mode
         timeout = args.timeout if args.timeout is not None else 0
