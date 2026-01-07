@@ -917,10 +917,10 @@ def main():
                 if args.verbose:
                     print("Added -nographic option")
 
-        # CRITICAL: Activate console FIRST (before power cycle)
-        # This ensures we capture ALL boot output including bootrom
-        print("Activating console...")
-        target.activate(console)
+            # CRITICAL: Activate console FIRST (before power cycle)
+            # This ensures we capture ALL boot output including bootrom
+            print("Activating console...")
+            target.activate(console)
 
         # Bootstrap target (QEMU or hardware)
         bootstrap_target(target, console, is_qemu, args)
