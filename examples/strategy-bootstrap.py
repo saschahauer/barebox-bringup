@@ -17,7 +17,8 @@ from barebox_bringup.strategy_utils import never_retry
 class BootstrapStatus(enum.Enum):
     unknown = 0
     off = 1
-    barebox = 2
+    on = 2
+    barebox = 3
 
 
 @target_factory.reg_driver
@@ -90,10 +91,8 @@ class BootstrapStrategy(Strategy):
             self.target.activate(self.power)
             self.power.off()
 
-        elif status == BootstrapStatus.barebox:
-            # Main testing state: Bootstrap to barebox
+        elif status == BootstrapStatus.on:
             self.transition(BootstrapStatus.off)  # pylint: disable=missing-kwoa
-
             self.target.activate(self.console)
 
             # Power cycle to bootrom/recovery mode
@@ -107,6 +106,11 @@ class BootstrapStrategy(Strategy):
 
             self.target.activate(self.usbloader)
             self.usbloader.load(image_path)
+
+        elif status == BootstrapStatus.barebox or
+            self.transition(BootstrapStatus.on)  # pylint: disable=missing-kwoa
+            # interrupt barebox
+            self.target.activate(self.barebox)
 
         else:
             raise StrategyError(

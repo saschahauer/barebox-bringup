@@ -17,7 +17,8 @@ from barebox_bringup.strategy_utils import never_retry
 class SDMuxStatus(enum.Enum):
     unknown = 0
     off = 1
-    barebox = 2
+    on = 2
+    barebox = 3
 
 
 @target_factory.reg_driver
@@ -91,7 +92,7 @@ class SDMuxStrategy(Strategy):
             self.target.activate(self.power)
             self.power.off()
 
-        elif status == SDMuxStatus.barebox:
+        elif status == SDMuxStatus.on:
             # Main boot sequence: Write SD (if needed) and boot
 
             # First ensure we're powered off
@@ -147,6 +148,10 @@ class SDMuxStrategy(Strategy):
             # Power cycle to boot from SD
             self.power.cycle()
 
+        elif status == SDMuxStatus.barebox:
+            self.transition(SDMuxStatus.on)  # pylint: disable=missing-kwoa
+            # interrupt barebox
+            self.target.activate(self.barebox)
         else:
             raise StrategyError(
                 f"no transition found from {self.status} to {status}"

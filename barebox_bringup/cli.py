@@ -728,7 +728,7 @@ def bootstrap_target(target, console, args):
         if not args.no_power_cycle:
             print("Bootstrapping target...")
             try:
-                strategy.transition('barebox')
+                strategy.transition('on')
             except Exception as e:
                 # Strategy failed - this is a fatal error
                 print(f"Error: Strategy failed: {e}")
