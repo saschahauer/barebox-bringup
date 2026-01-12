@@ -219,7 +219,7 @@ def load_environment(config_file, coordinator=None, proxy=None, image_overrides=
         - Positional: "path" - Override first image (backwards compatibility)
 
         Examples:
-        - --image tiboot3.img=/path/to/tiboot3.img --image barebox-proper.img=/path/to/barebox.img
+        - --image tiboot3=/path/to/tiboot3.img --image barebox=/path/to/barebox.img
         - --image /path/to/barebox.img (overrides first image)
     """
     # Set up labgrid logging
