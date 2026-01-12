@@ -43,13 +43,13 @@ Examples:
   %(prog)s -c test/arm/imx6s-riotboard.yaml --image /path/to/barebox.img
 
   # Override multiple images from config file (named)
-  %(prog)s -c test/arm/vusion-ugate.yaml --image tiboot3.img=/path/to/tiboot3.img --image barebox-proper.img=/path/to/barebox.img
+  %(prog)s -c test/arm/am62l-evk.yaml --image tiboot3=/path/to/tiboot3.img --image barebox=/path/to/barebox.img
 
   # Use known-good image set from config file
-  %(prog)s -c test/arm/vusion-ugate.yaml --images known_good
+  %(prog)s -c test/arm/am62l-evk.yaml --images known_good
 
   # Use testing image set from config file
-  %(prog)s -c test/arm/vusion-ugate.yaml --images testing
+  %(prog)s -c test/arm/am62l-evk.yaml --images testing
 
   # Interactive with auto-created FIFO for programmatic control
   %(prog)s -c test/arm/imx6s-riotboard.yaml -i -o boot.log &
