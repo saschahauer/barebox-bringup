@@ -480,21 +480,70 @@ def _read_from_input(input_fd, input_fifo, check_ctrl_bracket=True):
         return None, False
 
 
-def _read_from_console(console):
+def _read_from_console(console, verbose=False):
     """Read data from console with timeout handling
 
     Args:
         console: Active ConsoleProtocol driver
+        verbose: If True, log all exceptions for debugging
 
     Returns:
-        bytes or None
+        tuple: (data, console_alive)
+               data is bytes or None
+               console_alive is False if console has closed/failed
     """
+    import logging
     try:
         data = console.read(timeout=0.05, max_size=4096)
-        return data if data else None
-    except Exception:
-        # Timeout is expected
-        return None
+        return (data if data else None, True)
+    except TimeoutError:
+        # Normal timeout, console still alive
+        return (None, True)
+    except (BrokenPipeError, ConnectionError, EOFError):
+        # Connection definitively closed
+        return (None, False)
+    except OSError as e:
+        # Check if it's a "bad file descriptor" or similar critical error
+        import errno
+        if e.errno in (errno.EBADF, errno.EPIPE, errno.ECONNRESET):
+            return (None, False)
+        # For all other OSErrors, treat as timeout (be conservative)
+        if verbose:
+            logging.info(f"OSError from console.read() treated as timeout: {type(e).__name__}: {e}")
+        return (None, True)
+    except Exception as e:
+        # Be very conservative for non-QEMU consoles
+        # Only treat as dead for very specific exception types
+        # Most labgrid exceptions for timeouts should be treated as "alive"
+        if verbose:
+            logging.info(f"Exception from console.read() treated as timeout: {type(e).__name__}: {e}")
+        # Otherwise treat as normal timeout
+        return (None, True)
+
+
+def _check_console_alive(console):
+    """Check if console/target is still alive
+
+    Args:
+        console: Console driver
+
+    Returns:
+        bool: True if alive, False if dead
+    """
+    from labgrid.driver import QEMUDriver
+
+    # For QEMU, check if the process is still running
+    if isinstance(console, QEMUDriver):
+        try:
+            # QEMUDriver stores the subprocess in _child
+            if hasattr(console, '_child') and console._child:
+                # poll() returns None if process is still running
+                return console._child.poll() is None
+        except Exception:
+            pass
+
+    # For other console types, assume alive (we'll detect on read/write)
+    return True
 
 
 def interactive_console(console, input_fifo=None, output_fd=None, timeout=0):
@@ -527,14 +576,27 @@ def interactive_console(console, input_fifo=None, output_fd=None, timeout=0):
     try:
         input_fd, old_settings = _open_input_source(input_fifo)
 
+        # Check if we should monitor input_fd or not
+        # Only monitor stdin if it's a TTY, or always monitor FIFO
+        monitor_input = input_fifo is not None or (input_fd is not None and os.isatty(input_fd))
+
         while True:
+            # Check if console/target is still alive
+            if not _check_console_alive(console):
+                print("\nConsole closed (target terminated)")
+                break
             # Check timeout
             if timeout > 0 and (time.time() - start_time >= timeout):
                 print("\nTimeout reached")
                 break
 
             # Check for data from input or console
-            readable, _, _ = select.select([input_fd], [], [], 0.01)
+            # Only include input_fd in select if we should monitor it
+            if monitor_input:
+                readable, _, _ = select.select([input_fd], [], [], 0.01)
+            else:
+                readable = []
+                time.sleep(0.01)
 
             # Read from input source and send to console
             if input_fd in readable:
@@ -542,10 +604,18 @@ def interactive_console(console, input_fifo=None, output_fd=None, timeout=0):
                 if should_exit:
                     break
                 if data:
-                    console.write(data)
+                    try:
+                        console.write(data)
+                    except Exception:
+                        # Console write failed - console is closed
+                        print("\nConsole closed (target terminated)")
+                        break
 
             # Read from console and display
-            data = _read_from_console(console)
+            data, console_alive = _read_from_console(console)
+            if not console_alive:
+                print("\nConsole closed (target terminated)")
+                break
             if data:
                 sys.stdout.buffer.write(data)
                 sys.stdout.buffer.flush()
@@ -597,6 +667,11 @@ def non_interactive_console(console, input_fifo=None, output_fd=None, timeout=60
         quiet_time = 0
 
         while not stop_requested:
+            # Check if console/target is still alive
+            if not _check_console_alive(console):
+                print("\nConsole closed (target terminated)")
+                break
+
             # Check timeout
             if timeout > 0 and (time.time() - start_time >= timeout):
                 print("\nTimeout reached")
@@ -616,11 +691,19 @@ def non_interactive_console(console, input_fifo=None, output_fd=None, timeout=60
             if input_fd in readable:
                 data, _ = _read_from_input(input_fd, input_fifo, check_ctrl_bracket=False)
                 if data:
-                    console.write(data)
-                    quiet_time = 0  # Reset quiet timer on input
+                    try:
+                        console.write(data)
+                        quiet_time = 0  # Reset quiet timer on input
+                    except Exception:
+                        # Console write failed - console is closed
+                        print("\nConsole closed (target terminated)")
+                        break
 
             # Read from console and write to file
-            data = _read_from_console(console)
+            data, console_alive = _read_from_console(console)
+            if not console_alive:
+                print("\nConsole closed (target terminated)")
+                break
             if data:
                 if output_fd:
                     os.write(output_fd, data)
@@ -757,8 +840,28 @@ def cleanup_resources(console, target, session, loop, place_name,
         env: Environment object (or None)
         verbose: If True, print additional error details
     """
-    # Power off the target before cleanup
+    import atexit
+
+    # Unregister labgrid's atexit handler to prevent duplicate cleanup attempts
+    # We'll handle cleanup ourselves to avoid errors when QEMU has already exited
+    if target:
+        try:
+            atexit.unregister(target._atexit_cleanup)
+        except Exception:
+            # atexit.unregister might not work with bound methods in older Python
+            pass
+
+    # Deactivate console first to prevent issues if target already terminated
     if console and target:
+        try:
+            target.deactivate(console)
+        except Exception as e:
+            # Console may already be closed (e.g., QEMU exited)
+            if verbose:
+                print(f"  (Console deactivation: {e})")
+
+    # Power off the target before cleanup
+    if target:
         try:
             # Hardware: try strategy first (handles multiple power sources),
             # then fall back to PowerProtocol for simple cases
@@ -771,9 +874,11 @@ def cleanup_resources(console, target, session, loop, place_name,
                     print("Powering off target via strategy...")
                     strategy.transition('off')
                     powered_off = True
-            except Exception:
+            except Exception as e:
                 # Strategy not available or doesn't support 'off' state
-                pass
+                # If QEMU already exited, this will fail - that's okay
+                if verbose:
+                    print(f"  (Strategy transition to off: {e})")
 
             # Fallback: use PowerProtocol directly (for non-strategy configs)
             if not powered_off:
@@ -785,8 +890,18 @@ def cleanup_resources(console, target, session, loop, place_name,
                     # No power driver or power off failed
                     if verbose:
                         print(f"  (Could not power off: {e})")
+
+            # Deactivate all remaining drivers to prevent labgrid atexit from trying
+            # This is especially important for QEMU where the process may have already exited
+            try:
+                target.deactivate_all_drivers()
+            except Exception as e:
+                # Deactivation may fail if target already terminated - that's expected
+                if verbose:
+                    print(f"  (Deactivate all drivers: {e})")
         except Exception as e:
-            print(f"Warning: Failed to power off target: {e}")
+            if verbose:
+                print(f"  (Power off error: {e})")
 
     # Release place only if we acquired it (not if it was already acquired)
     if session and place_name and place_acquired and loop:
@@ -824,6 +939,16 @@ def cleanup_resources(console, target, session, loop, place_name,
             print(f"Removed FIFO: {input_fifo}")
         except Exception:
             pass
+
+    # Call target.cleanup() since we unregistered labgrid's atexit handler
+    # We've already deactivated drivers above, so this should mostly be cleanup of other resources
+    if target:
+        try:
+            target.cleanup()
+        except Exception as e:
+            # Cleanup may fail if QEMU already exited - suppress common errors
+            if verbose:
+                print(f"  (Target cleanup: {e})")
 
     # Cleanup environment
     if env:
