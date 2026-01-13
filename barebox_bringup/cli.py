@@ -89,6 +89,8 @@ Examples:
     # Control options
     parser.add_argument('--no-power-cycle', action='store_true',
                         help='Skip power cycle, assume target is already on')
+    parser.add_argument('-s', '--state', type=str, default='on',
+                        help='Target state to transition to (default: on)')
     parser.add_argument('--timeout', type=int, default=None,
                         help='Timeout in seconds for operations (default: no timeout)')
     parser.add_argument('--image', action='append', dest='images',
@@ -787,13 +789,14 @@ def setup_coordinator_session(env, coordinator_address, proxy_address, place_nam
     return loop, session, place_acquired
 
 
-def bootstrap_target(target, console, args):
+def bootstrap_target(target, console, args, state='on'):
     """Bootstrap target hardware
 
     Args:
         target: Target object
         console: Console driver
         args: Parsed command-line arguments
+        state: Target state to transition to (default: 'on')
     """
     # Hardware: use strategy
     # First check if strategy driver exists
@@ -809,9 +812,9 @@ def bootstrap_target(target, console, args):
     # If strategy exists, use it - any errors should bail out
     if strategy:
         if not args.no_power_cycle:
-            print("Bootstrapping target...")
+            print(f"Bootstrapping target to '{state}' state...")
             try:
-                strategy.transition('on')
+                strategy.transition(state)
             except Exception as e:
                 # Strategy failed - this is a fatal error
                 print(f"Error: Strategy failed: {e}")
@@ -1058,7 +1061,7 @@ def main():
         console = target.get_driver(ConsoleProtocol, activate=False)
 
         # Bootstrap target hardware
-        bootstrap_target(target, console, args)
+        bootstrap_target(target, console, args, state=args.state)
 
         # Enter appropriate console mode
         timeout = args.timeout if args.timeout is not None else 0
