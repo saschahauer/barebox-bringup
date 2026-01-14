@@ -61,6 +61,11 @@ Examples:
   %(prog)s -c test/arm/imx6s-riotboard.yaml -i /tmp/cmds.fifo -o boot.log &
   echo "help" > /tmp/cmds.fifo
 
+  # Interactive with commands from regular file (watches file for new input)
+  %(prog)s -c test/arm/imx6s-riotboard.yaml -f commands.txt -o boot.log &
+  # In another terminal: echo "version" >> commands.txt
+  # In another terminal: echo "help" >> commands.txt
+
   # Non-interactive (no keyboard input, output only)
   %(prog)s -c test/arm/imx6s-riotboard.yaml -n -o boot.log
 ''')
@@ -78,6 +83,8 @@ Examples:
                         help='Output file for console log (works in all modes)')
     parser.add_argument('-i', '--input', nargs='?', const='', type=str, metavar='FIFO',
                         help='Input FIFO: without arg creates temp FIFO, with arg creates specified FIFO')
+    parser.add_argument('-f', '--file', type=str, metavar='FILE',
+                        help='Input file: read commands from regular file, watching for new input (like tail -f)')
 
     # Target configuration
     parser.add_argument('-r', '--role', type=str, default='main',
@@ -408,42 +415,52 @@ async def release_place(session, place_name):
     print(f"Released place {place.name}")
 
 
-def _open_input_source(input_fifo):
-    """Open input source (FIFO or stdin) and setup terminal
+def _open_input_source(input_fifo, input_file):
+    """Open input source (FIFO, file, or stdin) and setup terminal
 
     Args:
-        input_fifo: Optional path to FIFO, or None for stdin
+        input_fifo: Optional path to FIFO, or None
+        input_file: Optional path to regular file, or None
 
     Returns:
-        tuple: (input_fd, old_settings)
-               old_settings is None if stdin is not a TTY or using FIFO
+        tuple: (input_fd, old_settings, is_file)
+               old_settings is None if stdin is not a TTY or using FIFO/file
+               is_file is True if using a regular file (not FIFO)
     """
     import tty
     import termios
 
-    if input_fifo:
+    if input_file:
+        # Open regular file in blocking mode
+        input_fd = os.open(input_file, os.O_RDONLY)
+        old_settings = None
+        is_file = True
+    elif input_fifo:
         # Open FIFO in non-blocking mode
         input_fd = os.open(input_fifo, os.O_RDONLY | os.O_NONBLOCK)
         old_settings = None
+        is_file = False
     else:
         # Use stdin
         input_fd = sys.stdin.fileno()
         old_settings = None
+        is_file = False
         # Only set raw mode if stdin is actually a TTY
         if os.isatty(input_fd):
             old_settings = termios.tcgetattr(input_fd)
             tty.setraw(input_fd)
 
-    return input_fd, old_settings
+    return input_fd, old_settings, is_file
 
 
-def _close_input_source(input_fd, old_settings, input_fifo):
+def _close_input_source(input_fd, old_settings, input_fifo, input_file):
     """Close input source and restore terminal settings
 
     Args:
         input_fd: File descriptor to close (or None)
         old_settings: Terminal settings to restore (or None)
         input_fifo: FIFO path (for determining whether to close fd)
+        input_file: File path (for determining whether to close fd)
     """
     import termios
 
@@ -451,17 +468,19 @@ def _close_input_source(input_fd, old_settings, input_fifo):
     if old_settings:
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old_settings)
 
-    # Close FIFO if opened
-    if input_fifo and input_fd is not None:
+    # Close FIFO or file if opened
+    if (input_fifo or input_file) and input_fd is not None:
         os.close(input_fd)
 
 
-def _read_from_input(input_fd, input_fifo, check_ctrl_bracket=True):
-    """Read data from input source (FIFO or stdin)
+def _read_from_input(input_fd, input_fifo, input_file, is_file, check_ctrl_bracket=True):
+    """Read data from input source (FIFO, file, or stdin)
 
     Args:
         input_fd: File descriptor to read from
-        input_fifo: FIFO path (or None for stdin)
+        input_fifo: FIFO path (or None)
+        input_file: File path (or None)
+        is_file: True if reading from regular file
         check_ctrl_bracket: If True, check for Ctrl-] exit key
 
     Returns:
@@ -472,18 +491,19 @@ def _read_from_input(input_fd, input_fifo, check_ctrl_bracket=True):
         data = os.read(input_fd, 1024)
         if not data:
             # EOF
-            if not input_fifo:
+            if not input_fifo and not input_file:
                 # EOF on stdin - exit
                 return None, True
+            # EOF on FIFO or regular file - keep running (wait for more input)
             return None, False
 
-        # Check for Ctrl-] only from keyboard (not FIFO)
-        if check_ctrl_bracket and not input_fifo and len(data) == 1 and data == b'\x1d':
+        # Check for Ctrl-] only from keyboard (not FIFO or file)
+        if check_ctrl_bracket and not input_fifo and not input_file and len(data) == 1 and data == b'\x1d':
             return None, True
 
         return data, False
     except OSError:
-        # EAGAIN/EWOULDBLOCK on non-blocking read
+        # EAGAIN/EWOULDBLOCK on non-blocking read (FIFO only)
         return None, False
 
 
@@ -553,23 +573,27 @@ def _check_console_alive(console):
     return True
 
 
-def interactive_console(console, input_fifo=None, output_fd=None, timeout=0):
+def interactive_console(console, input_fifo=None, input_file=None, output_fd=None, timeout=0):
     """Provide interactive console access with manual I/O handling
 
     Console output goes to stdout/screen (and optionally to file).
-    Keyboard input (or FIFO input) goes to console.
+    Keyboard input (or FIFO/file input) goes to console.
     Press Ctrl-] to exit.
 
     Args:
         console: Active ConsoleProtocol driver
         input_fifo: Optional path to named pipe for command input
+        input_file: Optional path to regular file for command input
         output_fd: Optional open file descriptor for logging (already opened)
         timeout: Timeout in seconds (0 = no timeout)
     """
     import select
 
     print("=== Interactive Console ===")
-    if input_fifo:
+    if input_file:
+        print(f"Reading commands from file: {input_file}")
+        print("Watching file for new input. Press Ctrl-C to exit")
+    elif input_fifo:
         print(f"Reading commands from FIFO: {input_fifo}")
         print("Press Ctrl-C to exit")
     else:
@@ -578,14 +602,15 @@ def interactive_console(console, input_fifo=None, output_fd=None, timeout=0):
 
     input_fd = None
     old_settings = None
+    is_file = False
     start_time = time.time() if timeout > 0 else None
 
     try:
-        input_fd, old_settings = _open_input_source(input_fifo)
+        input_fd, old_settings, is_file = _open_input_source(input_fifo, input_file)
 
         # Check if we should monitor input_fd or not
-        # Only monitor stdin if it's a TTY, or always monitor FIFO
-        monitor_input = input_fifo is not None or (input_fd is not None and os.isatty(input_fd))
+        # Only monitor stdin if it's a TTY, or always monitor FIFO/file
+        monitor_input = input_fifo is not None or input_file is not None or (input_fd is not None and os.isatty(input_fd))
 
         while True:
             # Check if console/target is still alive
@@ -607,7 +632,7 @@ def interactive_console(console, input_fifo=None, output_fd=None, timeout=0):
 
             # Read from input source and send to console
             if input_fd in readable:
-                data, should_exit = _read_from_input(input_fd, input_fifo, check_ctrl_bracket=True)
+                data, should_exit = _read_from_input(input_fd, input_fifo, input_file, is_file, check_ctrl_bracket=True)
                 if should_exit:
                     break
                 if data:
@@ -632,31 +657,35 @@ def interactive_console(console, input_fifo=None, output_fd=None, timeout=0):
     except KeyboardInterrupt:
         pass
     finally:
-        _close_input_source(input_fd, old_settings, input_fifo)
+        _close_input_source(input_fd, old_settings, input_fifo, input_file)
         print("\n=== Console closed ===")
 
 
-def non_interactive_console(console, input_fifo=None, output_fd=None, timeout=60):
+def non_interactive_console(console, input_fifo=None, input_file=None, output_fd=None, timeout=60):
     """Provide non-interactive console access (no keyboard input)
 
     Console output goes to file only (not to screen).
-    Optional input from FIFO.
+    Optional input from FIFO or file.
 
     Args:
         console: Active ConsoleProtocol driver
         input_fifo: Optional named pipe to read commands from
+        input_file: Optional regular file to read commands from
         output_fd: Open file descriptor for output (already opened)
         timeout: Timeout for waiting for all output (0 = no timeout)
     """
     import select
 
     print("=== Non-Interactive Console (output to file only) ===")
-    if input_fifo:
+    if input_file:
+        print(f"Reading from file: {input_file}")
+    elif input_fifo:
         print(f"Reading from FIFO: {input_fifo}")
     print("Press Ctrl-C to stop")
     print("=" * 40)
 
     input_fd = None
+    is_file = False
     stop_requested = False
 
     def signal_handler(sig, frame):
@@ -665,9 +694,13 @@ def non_interactive_console(console, input_fifo=None, output_fd=None, timeout=60
     signal.signal(signal.SIGINT, signal_handler)
 
     try:
-        # Open input FIFO if provided (no terminal setup for non-interactive)
-        if input_fifo:
+        # Open input FIFO or file if provided (no terminal setup for non-interactive)
+        if input_file:
+            input_fd = os.open(input_file, os.O_RDONLY)
+            is_file = True
+        elif input_fifo:
             input_fd = os.open(input_fifo, os.O_RDONLY | os.O_NONBLOCK)
+            is_file = False
 
         # Read all output until timeout or Ctrl-C
         start_time = time.time()
@@ -687,16 +720,19 @@ def non_interactive_console(console, input_fifo=None, output_fd=None, timeout=60
             # Build list of file descriptors to monitor
             read_fds = [input_fd] if input_fd is not None else []
 
-            # Check for data from input FIFO
+            # Check for data from input FIFO or file
             if read_fds:
                 readable, _, _ = select.select(read_fds, [], [], 0.01)
             else:
                 readable = []
                 time.sleep(0.01)
 
-            # Read from FIFO and send to console
+            # Read from FIFO/file and send to console
             if input_fd in readable:
-                data, _ = _read_from_input(input_fd, input_fifo, check_ctrl_bracket=False)
+                data, should_exit = _read_from_input(input_fd, input_fifo, input_file, is_file, check_ctrl_bracket=False)
+                if should_exit:
+                    # Should not happen for FIFO/file in non-interactive mode
+                    break
                 if data:
                     try:
                         console.write(data)
@@ -980,6 +1016,9 @@ def main():
     if args.non_interactive and not args.output:
         parser.error("--non-interactive requires --output")
 
+    if args.input is not None and args.file:
+        parser.error("--input and --file are mutually exclusive")
+
     # Set up logging level based on verbosity
     if args.verbose >= 3:
         logging.basicConfig(level=logging.DEBUG)
@@ -990,6 +1029,7 @@ def main():
 
     input_fifo = None
     fifo_created = False
+    input_file = None
     output_fd = None
     session = None
     place_name = None
@@ -1005,6 +1045,17 @@ def main():
         # Setup input FIFO if requested
         if args.input is not None:
             input_fifo, fifo_created = setup_input_fifo(args.input)
+
+        # Setup input file if requested
+        if args.file:
+            if not os.path.exists(args.file):
+                print(f"Error: Input file does not exist: {args.file}")
+                return 1
+            if not os.path.isfile(args.file):
+                print(f"Error: Input path is not a regular file: {args.file}")
+                return 1
+            input_file = args.file
+            print(f"Reading commands from file: {input_file}")
 
         # Create output file EARLY (so user can tail -f immediately)
         if args.output:
@@ -1088,10 +1139,10 @@ def main():
         timeout = args.timeout if args.timeout is not None else 0
 
         if args.non_interactive:
-            non_interactive_console(console, input_fifo, output_fd, timeout)
+            non_interactive_console(console, input_fifo, input_file, output_fd, timeout)
         else:
             # Interactive mode (default)
-            interactive_console(console, input_fifo, output_fd, timeout)
+            interactive_console(console, input_fifo, input_file, output_fd, timeout)
 
         return 0
 
