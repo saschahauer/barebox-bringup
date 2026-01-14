@@ -18,6 +18,8 @@ targets:
         memory: 1024M
         kernel: barebox.efi
         display: qemu-default
+        # Note: display setting is overridden to 'none' by default for headless operation
+        # Use --graphics flag to enable QEMU graphics output
         bios: /usr/share/ovmf/OVMF.fd  # UEFI firmware (adjust path for your system)
 
       QEMUStrategy: {}

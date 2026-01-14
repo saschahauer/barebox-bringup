@@ -18,6 +18,8 @@ targets:
         memory: 512M
         kernel: barebox-dt-2nd.img
         display: qemu-default
+        # Note: display setting is overridden to 'none' by default for headless operation
+        # Use --graphics flag to enable QEMU graphics output
 
       QEMUStrategy: {}
 

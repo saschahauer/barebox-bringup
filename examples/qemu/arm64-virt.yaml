@@ -28,7 +28,8 @@ targets:
         memory: 1024M
         kernel: barebox-dt-2nd.img
         display: qemu-default
-        # extra_args will have -nographic added automatically by barebox-bringup
+        # Note: display setting is overridden to 'none' by default for headless operation
+        # Use --graphics flag to enable QEMU graphics output
 
       # Barebox driver for console interaction
       # (Optional - useful for automated testing, not required for basic console access)

@@ -23,6 +23,7 @@ from labgrid.logging import basicConfig, StepLogger
 from labgrid.remote.client import start_session
 from labgrid.resource.remote import RemotePlaceManager
 from labgrid.util.proxy import proxymanager
+from labgrid.driver import QEMUDriver
 
 
 def create_argument_parser():
@@ -99,6 +100,10 @@ Examples:
                         help='Select named image set from config (default: auto-detect from environment)')
     parser.add_argument('--no-write', action='store_true',
                         help='Skip writing images to SD card, boot from existing card (SD-MUX only)')
+
+    # Display options
+    parser.add_argument('--graphic', '--graphics', action='store_true', dest='graphics',
+                        help='Enable QEMU graphics output (default: disabled for headless operation)')
 
     # Debugging
     parser.add_argument('-v', '--verbose', action='count', default=0,
@@ -1059,6 +1064,22 @@ def main():
 
         # Get console driver (but don't activate yet)
         console = target.get_driver(ConsoleProtocol, activate=False)
+
+        # Override QEMU display setting based on --graphics flag
+        # This prevents QEMU from trying to open a graphics window without X11/Wayland
+        if isinstance(console, QEMUDriver):
+            if not args.graphics:
+                # Default: disable graphics for headless operation
+                if console.display != "none":
+                    original_display = console.display
+                    console.display = "none"
+                    if args.verbose:
+                        print(f"Overriding QEMU display setting from '{original_display}' to 'none' (use --graphics to enable)")
+                    logging.info(f"QEMU display override: {console.display} -> none (use --graphics to enable)")
+            else:
+                # User explicitly requested graphics, keep the configured display setting
+                if args.verbose:
+                    print(f"Graphics enabled: using display setting '{console.display}' from config")
 
         # Bootstrap target hardware
         bootstrap_target(target, console, args, state=args.state)
