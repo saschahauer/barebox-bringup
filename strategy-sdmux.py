@@ -1,17 +1,22 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 import enum
-import sys
-from pathlib import Path
 
 import attr
 
 from labgrid import target_factory, step
 from labgrid.strategy import Strategy, StrategyError
 
-# Import never_retry from barebox_bringup (handles version compatibility)
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from barebox_bringup.strategy_utils import never_retry
+# Try to import never_retry, but provide a fallback if not available
+try:
+    from labgrid.strategy import never_retry
+except ImportError:
+    try:
+        from labgrid.strategy.common import never_retry
+    except ImportError:
+        # Fallback: define a no-op decorator if never_retry is not available
+        def never_retry(func):
+            return func
 
 
 class SDMuxStatus(enum.Enum):
@@ -57,6 +62,9 @@ class SDMuxStrategy(Strategy):
 
     status = attr.ib(default=SDMuxStatus.unknown)
     bootstrap_done = attr.ib(default=False, init=False)
+
+    def __attrs_post_init__(self):
+        super().__attrs_post_init__()
 
     @never_retry
     @step(args=['status'])
@@ -119,7 +127,7 @@ class SDMuxStrategy(Strategy):
                 image_name = list(images.keys())[0]
                 image_path = self.target.env.config.get_image_path(image_name)
 
-                # Get image attributes (seek, skip, etc.) from config
+                # Get image attributes (seek, etc.) from config
                 image_config = self.target.env.config.data.get('image-config', {})
                 image_params = image_config.get(image_name, {})
                 seek = image_params.get('seek')
@@ -146,7 +154,6 @@ class SDMuxStrategy(Strategy):
 
                 # Mark bootstrap as complete
                 self.bootstrap_done = True
-
             else:
                 # Just ensure SD is in DUT mode
                 # (either --no-write or already bootstrapped)

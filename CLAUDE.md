@@ -80,6 +80,30 @@ barebox-bringup -c config.yaml --images known_good
 barebox-bringup -c config.yaml --images testing
 ```
 
+#### Extended Image Format
+
+Images can be specified as simple paths (string) or as a dict with additional parameters:
+
+```yaml
+image-sets:
+  # Simple format: just the image path
+  default:
+    barebox.img: !template "$LG_BUILDDIR/images/barebox-board.img"
+
+  # Extended format with additional parameters
+  rockchip:
+    barebox.img:
+      image: !template "$LG_BUILDDIR/images/barebox-rock5t.img"
+      seek: 64  # Write at 64 * 512 byte offset (for Rockchip boards)
+```
+
+Supported parameters:
+- `image`: (required) Path to the image file
+- `seek`: (optional) Offset in 512-byte blocks at start of output for `write_image()` (dd seek=N)
+- `skip`: (optional) Offset in 512-byte blocks at start of input for `write_image()` (dd skip=N)
+
+Both formats can be mixed within the same image set, and old configs using simple paths continue to work unchanged.
+
 #### Auto-Detection of Yocto Builds
 
 When the `BBPATH` environment variable is set (indicating you're inside a Yocto build environment), the tool automatically selects the `yocto` image set instead of `default`:

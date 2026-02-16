@@ -55,19 +55,25 @@ targets:
 image-sets:
   # Default image set (used if no --images specified)
   default:
-    # Single image to write to SD card
-    # Use $LG_BUILDDIR for barebox build output
+    # Simple format: just image path
     barebox.img: !template "$LG_BUILDDIR/images/barebox-my-board.img"
-    # Or use absolute path
-    # barebox.img: "/path/to/barebox.img"
 
   # Known-good image set (use with --images known_good)
   known_good:
     barebox.img: "/path/to/validated/barebox.img"
 
-  # Example: testing image set (use with --images testing)
-  # testing:
-  #   barebox.img: "/path/to/experimental/barebox.img"
+  # Example with seek offset (use with --images rockchip)
+  # Some boards (e.g., Rockchip) require images to be written at an offset
+  rockchip:
+    barebox.img:
+      image: !template "$LG_BUILDDIR/images/barebox-rock5t.img"
+      seek: 64  # Write at 64 * 512 = 32KB offset (dd seek=N)
+
+  # Example with skip (skipping input blocks)
+  # skip_header:
+  #   barebox.img:
+  #     image: !template "$LG_BUILDDIR/images/barebox-with-header.img"
+  #     skip: 1  # Skip first 512 bytes of input (dd skip=N)
 
 imports:
   - ../strategy-sdmux.py

@@ -190,6 +190,38 @@ def determine_image_set(requested_set=None):
     return 'default'
 
 
+def normalize_image_config(image_dict):
+    """Normalize image configuration to support both formats.
+
+    Old format: image_name: path
+    New format: image_name: {image: path, seek: N, ...}
+
+    Args:
+        image_dict: Raw image configuration dict from YAML
+
+    Returns:
+        tuple: (images_dict, image_config_dict)
+            images_dict: {name: path} for labgrid compatibility
+            image_config_dict: {name: {image: path, seek: N, ...}} full config
+    """
+    images = {}
+    image_config = {}
+
+    for name, value in image_dict.items():
+        if isinstance(value, dict):
+            # New format with attributes
+            if 'image' not in value:
+                raise ValueError(f"Image '{name}' config missing 'image' key")
+            images[name] = value['image']
+            image_config[name] = value.copy()
+        else:
+            # Old format: just a path string
+            images[name] = value
+            image_config[name] = {'image': value}
+
+    return images, image_config
+
+
 def load_environment(config_file, coordinator=None, proxy=None, image_overrides=None, image_set='default', no_write=False):
     """Load labgrid environment from configuration file
 
@@ -261,6 +293,7 @@ def load_environment(config_file, coordinator=None, proxy=None, image_overrides=
     if image_sets:
         # New format with image sets
         # Expected: image-sets: { default: { img1: path1 }, known_good: { img1: path1 } }
+        # Or with attributes: image-sets: { default: { img1: { image: path1, seek: 64 } } }
         if image_set not in image_sets:
             available = ', '.join(sorted(image_sets.keys()))
             print(f"Error: Image set '{image_set}' not found in config")
@@ -274,17 +307,38 @@ def load_environment(config_file, coordinator=None, proxy=None, image_overrides=
             print(f"Error: Image set '{image_set}' exists but contains no images")
             sys.exit(1)
 
-        # Place selected images into the 'images' section for labgrid to use
-        env.config.data['images'] = selected_images.copy()
-        logging.info(f"Using image set '{image_set}' with images: {', '.join(selected_images.keys())}")
+        # Normalize image config to support both old and new formats
+        try:
+            images_paths, image_config = normalize_image_config(selected_images)
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+
+        # Debug: show what was normalized
+        logging.debug(f"Normalized images_paths: {images_paths}")
+        logging.debug(f"Normalized image_config: {image_config}")
+
+        # Place normalized paths into 'images' section for labgrid compatibility
+        env.config.data['images'] = images_paths
+        # Store full config (with seek, etc.) for strategies
+        env.config.data['image-config'] = image_config
+        logging.info(f"Using image set '{image_set}' with images: {', '.join(images_paths.keys())}")
     elif images:
         # Fallback to old 'images:' key (flat dict, no sets)
         if image_set != 'default':
             print(f"Warning: Config uses old 'images:' format, ignoring --images '{image_set}'")
             print("To use image sets, update config to: image-sets: { default: {...}, known_good: {...} }")
-        logging.info(f"Using images from 'images:' section (old format): {', '.join(images.keys())}")
-        # Already in 'images' for labgrid compatibility, just ensure it's a copy
-        env.config.data['images'] = images.copy()
+
+        # Normalize image config
+        try:
+            images_paths, image_config = normalize_image_config(images)
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+
+        logging.info(f"Using images from 'images:' section (old format): {', '.join(images_paths.keys())}")
+        env.config.data['images'] = images_paths
+        env.config.data['image-config'] = image_config
     else:
         print("Error: No 'image-sets:' or 'images:' section found in config")
         print("Expected format: image-sets: { default: {...}, known_good: {...}, ... }")
