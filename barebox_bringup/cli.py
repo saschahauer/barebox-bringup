@@ -192,6 +192,11 @@ def determine_image_set(requested_set=None):
         logging.info("Detected barebox source tree, using 'barebox' image set")
         return 'barebox'
 
+    # Check if we're inside a ptxdist workspace
+    if os.path.exists('configs/ptxconfig'):
+        logging.info("Detected ptxdist workspace, using 'ptxdist' image set")
+        return 'ptxdist'
+
     # Default
     return 'default'
 
