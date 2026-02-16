@@ -170,12 +170,13 @@ def determine_image_set(requested_set=None):
         requested_set: Image set explicitly requested by user (or None for auto-detect)
 
     Returns:
-        str: Name of image set to use ('default', 'yocto', or user-specified)
+        str: Name of image set to use ('default', 'yocto', 'barebox', or user-specified)
 
     Priority:
         1. User explicitly specified via --images (highest priority)
         2. BBPATH environment variable set -> use 'yocto'
-        3. Default to 'default'
+        3. Inside barebox source tree -> use 'barebox'
+        4. Default to 'default'
     """
     if requested_set is not None:
         # User explicitly requested a specific set
@@ -185,6 +186,11 @@ def determine_image_set(requested_set=None):
     if 'BBPATH' in os.environ:
         logging.info("Detected BBPATH environment variable, using 'yocto' image set")
         return 'yocto'
+
+    # Check if we're inside a barebox source tree
+    if os.path.exists('commands/barebox-update.c'):
+        logging.info("Detected barebox source tree, using 'barebox' image set")
+        return 'barebox'
 
     # Default
     return 'default'

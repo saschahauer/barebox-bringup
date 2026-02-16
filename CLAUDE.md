@@ -120,7 +120,8 @@ image-sets:
 Selection priority:
 1. **Explicit --images flag** (highest priority): Always used if specified
 2. **BBPATH environment variable**: Automatically selects 'yocto' if set
-3. **Default**: Uses 'default' image set
+3. **Barebox source tree**: Automatically selects 'barebox' if `commands/barebox-update.c` exists
+4. **Default**: Uses 'default' image set
 
 Example Yocto workflow:
 ```bash
