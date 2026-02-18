@@ -24,6 +24,7 @@ from labgrid.remote.client import start_session
 from labgrid.resource.remote import RemotePlaceManager
 from labgrid.util.proxy import proxymanager
 from labgrid.driver import QEMUDriver
+from labgrid.driver import SerialDriver
 
 
 def create_argument_parser():
@@ -1180,6 +1181,10 @@ def main():
 
         # Get console driver (but don't activate yet)
         console = target.get_driver(ConsoleProtocol, activate=False)
+
+        # Increase SerialDriver timeout for slow hardware (e.g. rfc2217 connections)
+        if isinstance(console, SerialDriver):
+            console.timeout = 10.0
 
         # Override QEMU display setting based on --graphics flag
         # This prevents QEMU from trying to open a graphics window without X11/Wayland
